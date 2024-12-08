@@ -4,11 +4,21 @@
 #include <limits>
 #include <opencv2/core/mat.hpp>
 #include <utility>
+#include <vector>
 
 #include "hydra/common/common_types.h"
 #include "hydra/input/sensor.h"
 
 namespace hydra {
+
+struct MaskData {
+  uint8_t class_id;
+  cv::Mat mask;
+
+  explicit MaskData(const std::uint8_t &class_id, const cv::Mat &mask)
+      : class_id(class_id), mask(mask) {}
+  virtual ~MaskData() = default;
+};
 
 struct InputData {
   using Ptr = std::shared_ptr<InputData>;
@@ -39,6 +49,9 @@ struct InputData {
 
   // Label image for semantic input data.
   cv::Mat label_image;
+
+  //! TEST: Instance masks for each instance in the label image
+  std::vector<MaskData> instance_masks;
 
   // 3D points of the range image in sensor or world frame.
   cv::Mat vertex_map;

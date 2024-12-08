@@ -44,7 +44,7 @@ std::unique_ptr<InputData> parseInputPacket(const InputPacket& input_packet,
     return nullptr;
   }
 
-  if (!data->getSensor().finalizeRepresentations(*data)) {
+  if (!data->getSensor().finalizeRepresentations(*data, true)) {
     LOG(ERROR) << "[Input Conversion] Unable to compute inputs for integration";
     return nullptr;
   }

@@ -5,8 +5,7 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- *  1. Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
+ *  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
  *
  *  2. Redistributions in binary form must reproduce the above copyright notice,
  *     this list of conditions and the following disclaimer in the documentation
@@ -33,6 +32,7 @@
  * purposes notwithstanding any copyright notation herein.
  * -------------------------------------------------------------------------- */
 #pragma once
+#include <vector>
 #include "hydra/input/input_data.h"
 
 namespace hydra {
@@ -60,6 +60,7 @@ struct ImageInputPacket : public SensorInputPacket {
   cv::Mat color;
   cv::Mat depth;
   cv::Mat labels;
+  std::vector<MaskData> instance_masks;
   bool color_is_bgr = false; // Otherwise, color is RGB already.
 };
 

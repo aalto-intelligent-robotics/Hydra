@@ -184,6 +184,7 @@ void BackendModule::save(const LogSetup& log_setup) {
   const auto pgmo_path = log_setup.getLogDir("backend/pgmo");
   private_dsg_->graph->save(backend_path + "/dsg.json", false);
   private_dsg_->graph->save(backend_path + "/dsg_with_mesh.json");
+  private_dsg_->graph->saveMapViews(backend_path + "../map_views");
   savePoseGraphSparseMapping(pgmo_path + "/sparsification_mapping.txt");
 
   const auto& prefix = GlobalInfo::instance().getRobotPrefix();

@@ -188,6 +188,10 @@ void FrontendModule::save(const LogSetup& log_setup) {
   dsg_->graph->save(output_path + "/dsg.json", false);
   dsg_->graph->save(output_path + "/dsg_with_mesh.json");
 
+  //! TEST: Save map views
+  const auto map_views_path = log_setup.getLogDir("map_views");
+  dsg_->graph->saveMapViews(map_views_path);
+
   const auto mesh = dsg_->graph->mesh();
   if (mesh && !mesh->empty()) {
     kimera_pgmo::WriteMesh(output_path + "/mesh.ply", *mesh);
@@ -239,6 +243,11 @@ void FrontendModule::spin() {
     }
 
     processNextInput(*queue_->front());
+    //
+    //! TEST: add image
+    dsg_->graph->addMapView(input->sensor_data->color_image);
+    //! TODO: Implement node -> mask matching here
+
     queue_->pop();
   }
 
@@ -460,7 +469,7 @@ void FrontendModule::updateFrontiers(const ReconstructionOutput& input) {
       frontier_places_->addFrontiers(
           input.timestamp_ns, *dsg_->graph, *places_nn_finder_);
     }  // end timing scope
-  }    // end graph update critical section
+  }  // end graph update critical section
 }
 
 void FrontendModule::updatePlaces(const ReconstructionOutput& input) {
