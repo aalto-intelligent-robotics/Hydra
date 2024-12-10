@@ -841,13 +841,17 @@ NodeIdSet FrontendModule::findObjectsInViewFrustum(const ReconstructionOutput& i
                               input.sensor_data->min_range,
                               input.sensor_data->max_range,
                               object_attr)) {
-      LOG(INFO) << "Object " << object_attr.name << " with Id " << node_id
-                << " is in view frustum";
-    } else {
-      LOG(INFO) << "Object " << object_attr.name << " with Id " << node_id
-                << " is NOT in view frustum";
+      nodes_in_view_frustum.insert(node_id);
     }
   }
+  std::ostringstream log_str;
+  log_str << "Objects in view frustum:\n";
+  for (const auto& node_id : nodes_in_view_frustum) {
+    const auto& node_attr =
+        dsg_->graph->getNode(node_id).attributes<ObjectNodeAttributes>();
+    log_str << "\nNodeID: " << node_id << " name: " << node_attr.name;
+  }
+  LOG(INFO) << log_str.str();
   return nodes_in_view_frustum;
 }
 

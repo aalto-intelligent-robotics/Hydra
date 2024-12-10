@@ -118,20 +118,19 @@ bool objectIsInViewFrustum(const Sensor& sensor,
                            spark_dsg::ObjectNodeAttributes node_attributes,
                            bool use_sensor_range) {
   // TEST: inherited from find blocks in view frustum
-  //
+
+  // Transformation matrix from (W)orld frame to (C)amera frame.
   const auto T_C_W = T_W_C.inverse();
-  // position of camera in world frame.
-  const auto camera_W = T_W_C.translation();
 
   min_range = use_sensor_range ? sensor.min_range() : min_range;
   max_range = use_sensor_range ? sensor.max_range() : max_range;
 
-  // position of object centroid in world frame
-  const auto offset = node_attributes.bounding_box.world_P_center;
+  // position of object center in world frame
+  const auto world_P_center = node_attributes.bounding_box.world_P_center;
   // Transform from (W)orld frame to (C)amera frame.
-  const auto p_C = T_C_W * (camera_W + offset);
-  const float distance = p_C.norm();
-  if (distance < min_range || distance > max_range) {
+  const auto p_C = T_C_W * world_P_center;
+  const float distance_to_cam = p_C.norm();
+  if (distance_to_cam < min_range || distance_to_cam > max_range) {
     return false;
   }
   return sensor.pointIsInViewFrustum(p_C);
