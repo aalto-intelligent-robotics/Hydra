@@ -47,6 +47,8 @@
 // purposes notwithstanding any copyright notation herein.
 #include "hydra/input/sensor_utilities.h"
 
+#include <Eigen/src/Core/Matrix.h>
+
 namespace hydra {
 
 bool blockIsInViewFrustum(const Sensor& sensor,
@@ -107,6 +109,32 @@ BlockIndices findBlocksInViewFrustum(const Sensor& sensor,
   }
 
   return result;
+}
+
+bool objectIsInViewFrustum(const Sensor& sensor,
+                           const Eigen::Isometry3f& T_W_C,
+                           float min_range,
+                           float max_range,
+                           spark_dsg::ObjectNodeAttributes node_attributes,
+                           bool use_sensor_range) {
+  // TEST: inherited from find blocks in view frustum
+  //
+  const auto T_C_W = T_W_C.inverse();
+  // position of camera in world frame.
+  const auto camera_W = T_W_C.translation();
+
+  min_range = use_sensor_range ? sensor.min_range() : min_range;
+  max_range = use_sensor_range ? sensor.max_range() : max_range;
+
+  // position of object centroid in world frame
+  const auto offset = node_attributes.bounding_box.world_P_center;
+  // Transform from (W)orld frame to (C)amera frame.
+  const auto p_C = T_C_W * (camera_W + offset);
+  const float distance = p_C.norm();
+  if (distance < min_range || distance > max_range) {
+    return false;
+  }
+  return sensor.pointIsInViewFrustum(p_C);
 }
 
 cv::Mat computeRangeImageFromPoints(const cv::Mat& points,

@@ -5,7 +5,7 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- *  1. Redistributions of source code must retain the above copyright notice,
+ *  1. Redistributions of source code must retain the above copyrighautot notice,
  *     this list of conditions and the following disclaimer.
  *
  *  2. Redistributions in binary form must reproduce the above copyright notice,
@@ -42,14 +42,17 @@
 #include <kimera_pgmo/compression/delta_compression.h>
 #include <kimera_pgmo/utils/common_functions.h>
 #include <kimera_pgmo/utils/mesh_io.h>
+#include <spark_dsg/node_attributes.h>
 
 #include <fstream>
 
+#include "hydra/common/common.h"
 #include "hydra/common/global_info.h"
 #include "hydra/frontend/frontier_extractor.h"
 #include "hydra/frontend/mesh_segmenter.h"
 #include "hydra/frontend/place_2d_segmenter.h"
 #include "hydra/frontend/place_mesh_connector.h"
+#include "hydra/input/sensor_utilities.h"
 #include "hydra/utils/display_utilities.h"
 #include "hydra/utils/mesh_utilities.h"
 #include "hydra/utils/nearest_neighbor_utilities.h"
@@ -246,7 +249,6 @@ void FrontendModule::spin() {
     //
     //! TEST: add image
     dsg_->graph->addMapView(input->sensor_data->color_image);
-    //! TODO: Implement node -> mask matching here
 
     queue_->pop();
   }
@@ -410,6 +412,8 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
                             *dsg_->graph);
     addPlaceObjectEdges(input.timestamp_ns);
   }  // end dsg critical section
+  //! TODO: add instance masks
+  findObjectsInViewFrustum(input);
 }
 
 using PgmoCloud = pcl::PointCloud<pcl::PointXYZRGBA>;
@@ -825,6 +829,26 @@ void FrontendModule::updatePlaceMeshMapping(const ReconstructionOutput& input) {
   VLOG_IF(1, num_missing > 0) << "[Frontend] " << num_missing
                               << " places missing basis points @ " << input.timestamp_ns
                               << " [ns]";
+}
+
+NodeIdSet FrontendModule::findObjectsInViewFrustum(const ReconstructionOutput& input) {
+  NodeIdSet nodes_in_view_frustum;
+  for (auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
+    NodeId node_id = node.first;
+    ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
+    if (objectIsInViewFrustum(input.sensor_data->getSensor(),
+                              input.sensor_data->getSensorPose().cast<float>(),
+                              input.sensor_data->min_range,
+                              input.sensor_data->max_range,
+                              object_attr)) {
+      LOG(INFO) << "Object " << object_attr.name << " with Id " << node_id
+                << " is in view frustum";
+    } else {
+      LOG(INFO) << "Object " << object_attr.name << " with Id " << node_id
+                << " is NOT in view frustum";
+    }
+  }
+  return nodes_in_view_frustum;
 }
 
 }  // namespace hydra

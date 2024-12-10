@@ -48,6 +48,7 @@
 #include "hydra/input/camera.h"
 
 #include <config_utilities/config_utilities.h>
+#include <glog/logging.h>
 
 #include <unordered_map>
 #include <vector>
@@ -200,9 +201,9 @@ cv::Mat Camera::computeVertexMap(const cv::Mat& depth_image,
                                 depth);
       const auto p_W = T_W_C ? ((*T_W_C) * p_C).eval() : p_C;
       VLOG(15) << "Computing 3D point cloud from depth image:\n"
-              << "(" << u << ", " << v << "), d=" << depth << ", fx=" << fx_inv
-              << ", fy=" << fy_inv << ", cx=" << config_.cx << ", cy=" << config_.cy
-              << " -> " << p_W.transpose();
+               << "(" << u << ", " << v << "), d=" << depth << ", fx=" << fx_inv
+               << ", fy=" << fy_inv << ", cx=" << config_.cx << ", cy=" << config_.cy
+               << " -> " << p_W.transpose();
       auto& vertex = vertices.at<cv::Vec3f>(v, u);
       vertex[0] = p_W.x();
       vertex[1] = p_W.y();

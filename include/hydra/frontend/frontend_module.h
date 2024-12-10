@@ -51,6 +51,7 @@
 #include "hydra/frontend/frontier_places_interface.h"
 #include "hydra/frontend/mesh_segmenter.h"
 #include "hydra/frontend/surface_places_interface.h"
+#include "hydra/input/sensor.h"
 #include "hydra/odometry/pose_graph_from_odom.h"
 #include "hydra/reconstruction/reconstruction_output.h"
 #include "hydra/utils/log_utilities.h"
@@ -152,6 +153,8 @@ class FrontendModule : public Module {
   void processNextInput(const ReconstructionOutput& msg);
 
   void updatePlaceMeshMapping(const ReconstructionOutput& input);
+
+  NodeIdSet findObjectsInViewFrustum(const ReconstructionOutput& input);
 
  protected:
   using InputPtrCallback = std::function<void(const ReconstructionOutput::Ptr&)>;

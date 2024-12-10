@@ -47,6 +47,8 @@
 // purposes notwithstanding any copyright notation herein.
 #pragma once
 
+#include <spark_dsg/node_attributes.h>
+
 #include <opencv2/core/mat.hpp>
 
 #include "hydra/input/sensor.h"
@@ -97,6 +99,14 @@ BlockIndices findBlocksInViewFrustum(
     float min_range = 0.f,
     float max_range = std::numeric_limits<float>::max(),
     bool use_sensor_range = true);
+
+// TODO: check if an object is in the view frustum of the camera
+bool objectIsInViewFrustum(const Sensor& sensor,
+                           const Eigen::Isometry3f& T_W_C,
+                           float min_range,
+                           float max_range,
+                           spark_dsg::ObjectNodeAttributes node_attributes,
+                           bool use_sensor_range = true);
 
 /**
  * @brief Compute range image from pointcloud
