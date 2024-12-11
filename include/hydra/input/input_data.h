@@ -12,11 +12,11 @@
 namespace hydra {
 
 struct MaskData {
-  uint8_t class_id;
+  int64 class_id;
   cv::Mat mask;
 
-  explicit MaskData(const std::uint8_t &class_id, const cv::Mat &mask)
-      : class_id(class_id), mask(mask) {}
+  // explicit MaskData(const std::uint8_t &class_id, const cv::Mat &mask)
+  //     : class_id(class_id), mask(mask) {}
   virtual ~MaskData() = default;
 };
 

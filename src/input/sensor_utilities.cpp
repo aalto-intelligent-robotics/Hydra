@@ -126,9 +126,9 @@ bool objectIsInViewFrustum(const Sensor& sensor,
   max_range = use_sensor_range ? sensor.max_range() : max_range;
 
   // position of object center in world frame
-  const auto world_P_center = node_attributes.bounding_box.world_P_center;
+  const Eigen::Vector3f& world_P_center = node_attributes.bounding_box.world_P_center;
   // Transform from (W)orld frame to (C)amera frame.
-  const auto p_C = T_C_W * world_P_center;
+  const Eigen::Vector3f p_C = T_C_W * world_P_center;
   const float distance_to_cam = p_C.norm();
   if (distance_to_cam < min_range || distance_to_cam > max_range) {
     return false;

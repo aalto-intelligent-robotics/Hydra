@@ -34,6 +34,7 @@
  * -------------------------------------------------------------------------- */
 #include "hydra/frontend/frontend_module.h"
 
+#include <Eigen/src/Core/Matrix.h>
 #include <config_utilities/config.h>
 #include <config_utilities/printing.h>
 #include <config_utilities/validation.h>
@@ -42,9 +43,19 @@
 #include <kimera_pgmo/compression/delta_compression.h>
 #include <kimera_pgmo/utils/common_functions.h>
 #include <kimera_pgmo/utils/mesh_io.h>
+#include <opencv2/core/hal/interface.h>
+#include <spark_dsg/instance_views.h>
 #include <spark_dsg/node_attributes.h>
+#include <sys/types.h>
 
+#include <cstdint>
 #include <fstream>
+#include <limits>
+#include <memory>
+#include <opencv2/core.hpp>
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
+#include <utility>
 
 #include "hydra/common/common.h"
 #include "hydra/common/global_info.h"
@@ -52,6 +63,7 @@
 #include "hydra/frontend/mesh_segmenter.h"
 #include "hydra/frontend/place_2d_segmenter.h"
 #include "hydra/frontend/place_mesh_connector.h"
+#include "hydra/input/input_data.h"
 #include "hydra/input/sensor_utilities.h"
 #include "hydra/utils/display_utilities.h"
 #include "hydra/utils/mesh_utilities.h"
@@ -246,9 +258,6 @@ void FrontendModule::spin() {
     }
 
     processNextInput(*queue_->front());
-    //
-    //! TEST: add image
-    dsg_->graph->addMapView(input->sensor_data->color_image);
 
     queue_->pop();
   }
@@ -412,8 +421,10 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
                             *dsg_->graph);
     addPlaceObjectEdges(input.timestamp_ns);
   }  // end dsg critical section
+  //! TEST: add image
+  dsg_->graph->addMapView(input.sensor_data->color_image);
   //! TODO: add instance masks
-  findObjectsInViewFrustum(input);
+  assignMasksToObjectsInViewFrustum(input);
 }
 
 using PgmoCloud = pcl::PointCloud<pcl::PointXYZRGBA>;
@@ -831,28 +842,105 @@ void FrontendModule::updatePlaceMeshMapping(const ReconstructionOutput& input) {
                               << " [ns]";
 }
 
-NodeIdSet FrontendModule::findObjectsInViewFrustum(const ReconstructionOutput& input) {
-  NodeIdSet nodes_in_view_frustum;
+//! TODO: Assign nodes to masks with same class id that is closest to it
+void assignMaskToNode(const std::unordered_map<int64, std::vector<MaskDataAndCentroid>>&
+                          masks_and_centroids,
+                      spark_dsg::ObjectNodeAttributes& object_attr,
+                      uint16_t image_id) {
+  // node's bounding box center in world frame
+  const Eigen::Vector3f& object_node_centroid = object_attr.bounding_box.world_P_center;
+  const uint8_t& class_id = object_attr.semantic_label;
+  float min_distance = std::numeric_limits<float>::infinity();
+  // cv::Mat1i mask_to_assign(img_height, img_width);
+  std::shared_ptr<cv::Mat> mask_to_assign;
+  bool has_mask_to_assign = false;
+  if (masks_and_centroids.find(class_id) != masks_and_centroids.end()) {
+    for (const auto& mask_data_and_centroid : masks_and_centroids.at(class_id)) {
+      // const MaskData& mask_data = mask_data_and_centroid.first;
+      const auto mask_data = mask_data_and_centroid.first;
+      const auto instance_centroid = mask_data_and_centroid.second;
+      float distance = (*instance_centroid - object_node_centroid).norm();
+      if (distance < min_distance) {
+        min_distance = distance;
+        //! BUG: FIX THIS (somehow width and height is corrupted, check where this
+        //! happened)
+        // LOG(INFO) << "Mask data mask w: " << mask_data->mask.rows
+        //           << " h: " << mask_data->mask.cols;
+        mask_to_assign = std::make_shared<cv::Mat>(mask_data->mask);
+        VLOG(2) << "Mask to assign data mask w: " << mask_to_assign->rows
+                << " h: " << mask_to_assign->cols;
+        has_mask_to_assign = true;
+      }
+    }
+  } else {
+    LOG(INFO) << "Found no masks with centroids close enough to assign to instance: "
+              << object_attr.name << " at view " << image_id;
+  }
+  if (has_mask_to_assign) {
+    object_attr.instance_views.add_view(image_id, *mask_to_assign);
+    LOG(INFO) << "Assigned mask to instance: " << object_attr.name << " at view "
+              << image_id;
+  } else {
+    LOG(INFO) << "Couldn't assign mask to instance: " << object_attr.name << " at view "
+              << image_id;
+  }
+}
+
+//! TEST: Get a mapping from classID -> list of centroids in that class
+ClassIDtoMaskDataAndCentroid getInstanceCentroids(const ReconstructionOutput& input) {
+  // Map from class id to centroid
+  ClassIDtoMaskDataAndCentroid cls_to_centroids;
+  cv::Mat vertex_map = input.sensor_data->vertex_map;
+  std::vector<MaskData> instance_masks_data = input.sensor_data->instance_masks;
+  for (const auto& mask_data : instance_masks_data) {
+    cv::Scalar vertex_mean = cv::mean(vertex_map, mask_data.mask);
+    auto centroid_ptr = std::make_shared<Eigen::Vector3f>(
+        vertex_mean[0], vertex_mean[1], vertex_mean[2]);
+
+    auto mask_data_ptr = std::make_shared<MaskData>(mask_data);
+    auto mask_data_and_centroid = std::make_pair(mask_data_ptr, centroid_ptr);
+    // LOG(INFO) << "[getInstanceCentroids] Mask data mask w: " <<
+    // mask_data_ptr->mask.rows
+    //           << " h: " << mask_data_ptr->mask.cols;
+    // LOG(INFO) << "[getInstanceCentroids] Mask data with centroid mask w: "
+    //           << mask_data_and_centroid.first->mask.rows
+    //           << " h: " << mask_data_and_centroid.first->mask.cols;
+
+    int64 class_id = mask_data.class_id;
+    if (cls_to_centroids.find(class_id) == cls_to_centroids.end()) {
+      MaskDataAndCentroidVec mask_vec;
+      mask_vec.push_back(mask_data_and_centroid);
+      cls_to_centroids.insert(std::make_pair(class_id, mask_vec));
+      VLOG(2) << "Added new mask with label: " << mask_data.class_id;
+    } else {
+      cls_to_centroids.at(mask_data.class_id).push_back(mask_data_and_centroid);
+      VLOG(2) << "Appended new mask with label: " << mask_data.class_id;
+    }
+  }
+  return cls_to_centroids;
+}
+
+//! TEST: Assign masks to ObjectNodeAttributes
+void FrontendModule::assignMasksToObjectsInViewFrustum(
+    const ReconstructionOutput& input) {
+  const auto centroids = getInstanceCentroids(input);
+
+  // NodeIdSet nodes_in_view_frustum;
+  std::vector<MaskData> masks_data = input.sensor_data->instance_masks;
+  // TODO: Find object centroids in world frame
   for (auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
-    NodeId node_id = node.first;
+    // NodeId node_id = node.first;
     ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
     if (objectIsInViewFrustum(input.sensor_data->getSensor(),
                               input.sensor_data->getSensorPose().cast<float>(),
                               input.sensor_data->min_range,
                               input.sensor_data->max_range,
                               object_attr)) {
-      nodes_in_view_frustum.insert(node_id);
+      // nodes_in_view_frustum.insert(node_id);
+      // TODO: Assign mask here
+      assignMaskToNode(centroids, object_attr, dsg_->graph->mapViewCount());
     }
   }
-  std::ostringstream log_str;
-  log_str << "Objects in view frustum:\n";
-  for (const auto& node_id : nodes_in_view_frustum) {
-    const auto& node_attr =
-        dsg_->graph->getNode(node_id).attributes<ObjectNodeAttributes>();
-    log_str << "\nNodeID: " << node_id << " name: " << node_attr.name;
-  }
-  LOG(INFO) << log_str.str();
-  return nodes_in_view_frustum;
 }
 
 }  // namespace hydra

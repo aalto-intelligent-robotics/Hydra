@@ -65,6 +65,10 @@ namespace hydra {
 
 class NearestNodeFinder;
 
+using MaskDataAndCentroid = std::pair<std::shared_ptr<MaskData>, std::shared_ptr<Eigen::Vector3f>>;
+using MaskDataAndCentroidVec = std::vector<MaskDataAndCentroid>;
+using ClassIDtoMaskDataAndCentroid = std::unordered_map<int64, MaskDataAndCentroidVec>;
+
 class FrontendModule : public Module {
  public:
   using Ptr = std::shared_ptr<FrontendModule>;
@@ -154,7 +158,7 @@ class FrontendModule : public Module {
 
   void updatePlaceMeshMapping(const ReconstructionOutput& input);
 
-  NodeIdSet findObjectsInViewFrustum(const ReconstructionOutput& input);
+  void assignMasksToObjectsInViewFrustum(const ReconstructionOutput& input);
 
  protected:
   using InputPtrCallback = std::function<void(const ReconstructionOutput::Ptr&)>;
