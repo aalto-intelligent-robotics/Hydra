@@ -2,6 +2,7 @@
 
 #include <Eigen/Geometry>
 #include <limits>
+#include <memory>
 #include <opencv2/core/mat.hpp>
 #include <utility>
 #include <vector>
@@ -12,11 +13,10 @@
 namespace hydra {
 
 struct MaskData {
+  using Ptr = std::shared_ptr<MaskData>;
   int64 class_id;
   cv::Mat mask;
 
-  // explicit MaskData(const std::uint8_t &class_id, const cv::Mat &mask)
-  //     : class_id(class_id), mask(mask) {}
   virtual ~MaskData() = default;
 };
 

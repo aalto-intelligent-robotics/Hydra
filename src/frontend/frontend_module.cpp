@@ -221,36 +221,9 @@ void FrontendModule::save(const LogSetup& log_setup) {
   dsg_->graph->saveMapViews(map_views_path);
 
   //! TEST: Save instance views
-  const spark_dsg::DynamicSceneGraph::MapViews& map_views = dsg_->graph->mapViews();
-  const SceneGraphLayer::Nodes& object_nodes =
-      dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes();
-  for (const auto& node : object_nodes) {
-    const unsigned long& node_id = node.first;
-    ObjectNodeAttributes object_node_attr =
-        node.second->attributes<ObjectNodeAttributes>();
-    // LOG(INFO) << node.first <<
-    // if (mkdir(std::to_string(node_id), 0777) == -1) {
-    const std::string& node_save_dir =
-        (output_path + "/instances/node_" + object_node_attr.name + "_" +
-         std::to_string(node_id));
-    std::filesystem::create_directories(node_save_dir.data());
-    int view_count = 0;
-    for (const auto& view : object_node_attr.instance_views.id_to_instance_masks) {
-      const uint16_t map_view_id = view.first;
-      const cv::Mat& mask = view.second;
-      cv::Mat masked_instance_view;
-      map_views.at(map_view_id).copyTo(masked_instance_view, mask);
-      const std::string& view_id = std::to_string(++view_count);
-      // const char& insert_char = '0';
-      // view_id.insert(view_id.begin(), 5 - view_id.length(), insert_char);
-    uint8_t width = 3;
-      std::ostringstream view_id_ss;
-      view_id_ss << std::setw(width) << std::setfill('0') << view_id;
-      const std::string& filename = node_save_dir + "/view_" + view_id_ss.str() + ".png";
-      LOG(INFO) << "Saved " << filename;
-      cv::imwrite(filename, masked_instance_view);
-    }
-  }
+  const auto output_instance_path = log_setup.getLogDir("instance_views");
+  dsg_->graph->saveInstanceViews(output_instance_path);
+  LOG(INFO) << "Saved instance views in " << output_instance_path;
 
   const auto mesh = dsg_->graph->mesh();
   if (mesh && !mesh->empty()) {
@@ -887,31 +860,25 @@ void FrontendModule::updatePlaceMeshMapping(const ReconstructionOutput& input) {
                               << " [ns]";
 }
 
-//! TODO: Assign nodes to masks with same class id that is closest to it
 void FrontendModule::assignMaskToNode(
-    const ClassIDtoMaskDataAndCentroid& masks_and_centroids,
+    const ClassToMaskDataAndCentroid& masks_and_centroids,
     const NodeId& node_id,
     spark_dsg::ObjectNodeAttributes& object_attr,
     uint16_t image_id) {
-  // node's bounding box center in world frame
-  const Eigen::Vector3f& object_node_centroid = object_attr.bounding_box.world_P_center;
+  const Centroid& object_node_centroid = object_attr.bounding_box.world_P_center;
   const uint8_t& class_id = object_attr.semantic_label;
   float min_distance = std::numeric_limits<float>::infinity();
-  // cv::Mat1i mask_to_assign(img_height, img_width);
   std::shared_ptr<cv::Mat> mask_to_assign;
   bool has_mask_to_assign = false;
+
   if (masks_and_centroids.find(class_id) != masks_and_centroids.end()) {
     for (const auto& mask_data_and_centroid : masks_and_centroids.at(class_id)) {
-      // const MaskData& mask_data = mask_data_and_centroid.first;
       const auto mask_data = mask_data_and_centroid.first;
       const auto instance_centroid = mask_data_and_centroid.second;
+
       float distance = (*instance_centroid - object_node_centroid).norm();
       if (distance < min_distance) {
         min_distance = distance;
-        //! BUG: FIX THIS (somehow width and height is corrupted, check where this
-        //! happened)
-        // LOG(INFO) << "Mask data mask w: " << mask_data->mask.rows
-        //           << " h: " << mask_data->mask.cols;
         mask_to_assign = std::make_shared<cv::Mat>(mask_data->mask);
         VLOG(2) << "Mask to assign data mask w: " << mask_to_assign->rows
                 << " h: " << mask_to_assign->cols;
@@ -919,43 +886,39 @@ void FrontendModule::assignMaskToNode(
       }
     }
   } else {
-    LOG(INFO) << "Found no masks with centroids close enough to assign to instance: "
-              << object_attr.name << " at view " << image_id;
+    VLOG(2) << "Found no masks with centroids close enough to assign to instance: "
+            << object_attr.name << " at view " << image_id;
   }
   if (has_mask_to_assign) {
     object_attr.instance_views.add_view(image_id, *mask_to_assign);
-    auto object_attr_assign = object_attr.clone();
+    NodeAttributes::Ptr object_attr_assign = object_attr.clone();
     dsg_->graph->addOrUpdateNode(
         DsgLayers::OBJECTS, node_id, std::move(object_attr_assign));
     VLOG(2) << "Assigned mask to instance: " << object_attr.name << " at view "
-              << image_id;
+            << image_id;
   } else {
     VLOG(2) << "Couldn't assign mask to instance: " << object_attr.name << " at view "
-              << image_id;
+            << image_id;
   }
 }
 
-//! TEST: Get a mapping from classID -> list of centroids in that class
-ClassIDtoMaskDataAndCentroid getInstanceCentroids(const ReconstructionOutput& input) {
+FrontendModule::ClassToMaskDataAndCentroid FrontendModule::calculateInstanceCentroids(
+    const ReconstructionOutput& input) {
   // Map from class id to centroid
-  ClassIDtoMaskDataAndCentroid cls_to_centroids;
+  ClassToMaskDataAndCentroid cls_to_centroids;
   cv::Mat vertex_map = input.sensor_data->vertex_map;
   std::vector<MaskData> instance_masks_data = input.sensor_data->instance_masks;
+
   for (const auto& mask_data : instance_masks_data) {
     cv::Scalar vertex_mean = cv::mean(vertex_map, mask_data.mask);
-    auto centroid_ptr = std::make_shared<Eigen::Vector3f>(
-        vertex_mean[0], vertex_mean[1], vertex_mean[2]);
+    CentroidPtr centroid_ptr =
+        std::make_shared<Centroid>(vertex_mean[0], vertex_mean[1], vertex_mean[2]);
 
     auto mask_data_ptr = std::make_shared<MaskData>(mask_data);
     auto mask_data_and_centroid = std::make_pair(mask_data_ptr, centroid_ptr);
-    // LOG(INFO) << "[getInstanceCentroids] Mask data mask w: " <<
-    // mask_data_ptr->mask.rows
-    //           << " h: " << mask_data_ptr->mask.cols;
-    // LOG(INFO) << "[getInstanceCentroids] Mask data with centroid mask w: "
-    //           << mask_data_and_centroid.first->mask.rows
-    //           << " h: " << mask_data_and_centroid.first->mask.cols;
 
     int64 class_id = mask_data.class_id;
+
     if (cls_to_centroids.find(class_id) == cls_to_centroids.end()) {
       MaskDataAndCentroidVec mask_vec;
       mask_vec.push_back(mask_data_and_centroid);
@@ -969,14 +932,11 @@ ClassIDtoMaskDataAndCentroid getInstanceCentroids(const ReconstructionOutput& in
   return cls_to_centroids;
 }
 
-//! TEST: Assign masks to ObjectNodeAttributes
 void FrontendModule::assignMasksToObjectsInViewFrustum(
     const ReconstructionOutput& input) {
-  const auto centroids = getInstanceCentroids(input);
+  const auto centroids = calculateInstanceCentroids(input);
 
-  // NodeIdSet nodes_in_view_frustum;
   std::vector<MaskData> masks_data = input.sensor_data->instance_masks;
-  // TODO: Find object centroids in world frame
   for (auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
     NodeId node_id = node.first;
     ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
@@ -985,8 +945,6 @@ void FrontendModule::assignMasksToObjectsInViewFrustum(
                               input.sensor_data->min_range,
                               input.sensor_data->max_range,
                               object_attr)) {
-      // nodes_in_view_frustum.insert(node_id);
-      // TODO: Assign mask here
       assignMaskToNode(centroids, node_id, object_attr, dsg_->graph->mapViewCount());
     }
   }

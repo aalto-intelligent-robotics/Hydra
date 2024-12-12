@@ -65,11 +65,6 @@ namespace hydra {
 
 class NearestNodeFinder;
 
-using MaskDataAndCentroid =
-    std::pair<std::shared_ptr<MaskData>, std::shared_ptr<Eigen::Vector3f>>;
-using MaskDataAndCentroidVec = std::vector<MaskDataAndCentroid>;
-using ClassIDtoMaskDataAndCentroid = std::unordered_map<int64, MaskDataAndCentroidVec>;
-
 class FrontendModule : public Module {
  public:
   using Ptr = std::shared_ptr<FrontendModule>;
@@ -78,6 +73,12 @@ class FrontendModule : public Module {
   using PositionMatrix = Eigen::Matrix<double, 3, Eigen::Dynamic>;
   using InputCallback = std::function<void(const ReconstructionOutput&)>;
   using Sink = OutputSink<uint64_t, const DynamicSceneGraph&, const BackendInput&>;
+
+  using Centroid = Eigen::Vector3f;
+  using CentroidPtr = std::shared_ptr<Centroid>;
+  using MaskDataAndCentroid = std::pair<MaskData::Ptr, CentroidPtr>;
+  using MaskDataAndCentroidVec = std::vector<MaskDataAndCentroid>;
+  using ClassToMaskDataAndCentroid = std::unordered_map<int64, MaskDataAndCentroidVec>;
 
   struct Config {
     size_t min_object_vertices = 20;
@@ -159,11 +160,40 @@ class FrontendModule : public Module {
 
   void updatePlaceMeshMapping(const ReconstructionOutput& input);
 
-  // TEST:
-  void assignMaskToNode(const ClassIDtoMaskDataAndCentroid& masks_and_centroids,
+  /**
+   * @brief Assign an instance mask to an object node by going through all the masks
+   * with the same category. Assign the mask with the closest centroid (calculated from
+   * calculateInstanceCentroids) to the node's bounding box centroid.
+   *
+   * @param masks_and_centroids an unordered map that maps the class id to the masks and
+   * centroids to support mapping instances with the same categories
+   * @param node_id the node ID
+   * @param object_attr attributes of the scene graph object node
+   * @param image_id The map view ID (MapView defined in spark_dsg)
+   */
+  void assignMaskToNode(const ClassToMaskDataAndCentroid& masks_and_centroids,
                         const NodeId& node_id,
                         spark_dsg::ObjectNodeAttributes& object_attr,
                         uint16_t image_id);
+  /**
+   * @brief Calculate the centroids for all instances. Apply each mask on the vertex map
+   * of calculated in calculateVertexMap@hydra/input/camera.cpp and get the instance
+   * centroids
+   *
+   * @param input output of ReconstructionModule, containing sensor data, vertex map,
+   * etc.
+   * @return an unordered map that maps the class id to the masks and
+   * centroids to support mapping instances with the same categories
+   */
+  ClassToMaskDataAndCentroid calculateInstanceCentroids(
+      const ReconstructionOutput& input);
+  /**
+   * @brief Get all object nodes within the camera's viewing frustum, then assign
+   * instance masks to them
+   *
+   * @param input output of ReconstructionModule, containing sensor data, vertex map,
+   * etc.
+   */
   void assignMasksToObjectsInViewFrustum(const ReconstructionOutput& input);
 
  protected:
