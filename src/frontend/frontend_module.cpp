@@ -5,8 +5,8 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- *  1. Redistributions of source code must retain the above copyrighautot notice,
- *     this list of conditions and the following disclaimer.
+ *  1. Redistributions of source code must retain the above copyrighautot notice, this
+ * list of conditions and the following disclaimer.
  *
  *  2. Redistributions in binary form must reproduce the above copyright notice,
  *     this list of conditions and the following disclaimer in the documentation
@@ -44,17 +44,24 @@
 #include <kimera_pgmo/utils/common_functions.h>
 #include <kimera_pgmo/utils/mesh_io.h>
 #include <opencv2/core/hal/interface.h>
+#include <spark_dsg/dynamic_scene_graph.h>
 #include <spark_dsg/instance_views.h>
 #include <spark_dsg/node_attributes.h>
+#include <spark_dsg/scene_graph_types.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <string>
 #include <utility>
 
 #include "hydra/common/common.h"
@@ -196,6 +203,12 @@ void FrontendModule::stopImpl() {
 
   VLOG(2) << "[Hydra Frontend]: " << queue_->size() << " messages left";
 }
+//
+// // The generic approach
+// template <typename T>
+// void pad(std::basic_string<T>& s, typename std::basic_string<T>::size_type n, T c) {
+//   if (n > s.length()) s.append(n - s.length(), c);
+// }
 
 void FrontendModule::save(const LogSetup& log_setup) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -204,8 +217,40 @@ void FrontendModule::save(const LogSetup& log_setup) {
   dsg_->graph->save(output_path + "/dsg_with_mesh.json");
 
   //! TEST: Save map views
-  const auto map_views_path = log_setup.getLogDir("map_views");
+  const std::string& map_views_path = log_setup.getLogDir("map_views");
   dsg_->graph->saveMapViews(map_views_path);
+
+  //! TEST: Save instance views
+  const spark_dsg::DynamicSceneGraph::MapViews& map_views = dsg_->graph->mapViews();
+  const SceneGraphLayer::Nodes& object_nodes =
+      dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes();
+  for (const auto& node : object_nodes) {
+    const unsigned long& node_id = node.first;
+    ObjectNodeAttributes object_node_attr =
+        node.second->attributes<ObjectNodeAttributes>();
+    // LOG(INFO) << node.first <<
+    // if (mkdir(std::to_string(node_id), 0777) == -1) {
+    const std::string& node_save_dir =
+        (output_path + "/instances/node_" + object_node_attr.name + "_" +
+         std::to_string(node_id));
+    std::filesystem::create_directories(node_save_dir.data());
+    int view_count = 0;
+    for (const auto& view : object_node_attr.instance_views.id_to_instance_masks) {
+      const uint16_t map_view_id = view.first;
+      const cv::Mat& mask = view.second;
+      cv::Mat masked_instance_view;
+      map_views.at(map_view_id).copyTo(masked_instance_view, mask);
+      const std::string& view_id = std::to_string(++view_count);
+      // const char& insert_char = '0';
+      // view_id.insert(view_id.begin(), 5 - view_id.length(), insert_char);
+    uint8_t width = 3;
+      std::ostringstream view_id_ss;
+      view_id_ss << std::setw(width) << std::setfill('0') << view_id;
+      const std::string& filename = node_save_dir + "/view_" + view_id_ss.str() + ".png";
+      LOG(INFO) << "Saved " << filename;
+      cv::imwrite(filename, masked_instance_view);
+    }
+  }
 
   const auto mesh = dsg_->graph->mesh();
   if (mesh && !mesh->empty()) {
@@ -843,10 +888,11 @@ void FrontendModule::updatePlaceMeshMapping(const ReconstructionOutput& input) {
 }
 
 //! TODO: Assign nodes to masks with same class id that is closest to it
-void assignMaskToNode(const std::unordered_map<int64, std::vector<MaskDataAndCentroid>>&
-                          masks_and_centroids,
-                      spark_dsg::ObjectNodeAttributes& object_attr,
-                      uint16_t image_id) {
+void FrontendModule::assignMaskToNode(
+    const ClassIDtoMaskDataAndCentroid& masks_and_centroids,
+    const NodeId& node_id,
+    spark_dsg::ObjectNodeAttributes& object_attr,
+    uint16_t image_id) {
   // node's bounding box center in world frame
   const Eigen::Vector3f& object_node_centroid = object_attr.bounding_box.world_P_center;
   const uint8_t& class_id = object_attr.semantic_label;
@@ -878,10 +924,13 @@ void assignMaskToNode(const std::unordered_map<int64, std::vector<MaskDataAndCen
   }
   if (has_mask_to_assign) {
     object_attr.instance_views.add_view(image_id, *mask_to_assign);
-    LOG(INFO) << "Assigned mask to instance: " << object_attr.name << " at view "
+    auto object_attr_assign = object_attr.clone();
+    dsg_->graph->addOrUpdateNode(
+        DsgLayers::OBJECTS, node_id, std::move(object_attr_assign));
+    VLOG(2) << "Assigned mask to instance: " << object_attr.name << " at view "
               << image_id;
   } else {
-    LOG(INFO) << "Couldn't assign mask to instance: " << object_attr.name << " at view "
+    VLOG(2) << "Couldn't assign mask to instance: " << object_attr.name << " at view "
               << image_id;
   }
 }
@@ -929,7 +978,7 @@ void FrontendModule::assignMasksToObjectsInViewFrustum(
   std::vector<MaskData> masks_data = input.sensor_data->instance_masks;
   // TODO: Find object centroids in world frame
   for (auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
-    // NodeId node_id = node.first;
+    NodeId node_id = node.first;
     ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
     if (objectIsInViewFrustum(input.sensor_data->getSensor(),
                               input.sensor_data->getSensorPose().cast<float>(),
@@ -938,7 +987,7 @@ void FrontendModule::assignMasksToObjectsInViewFrustum(
                               object_attr)) {
       // nodes_in_view_frustum.insert(node_id);
       // TODO: Assign mask here
-      assignMaskToNode(centroids, object_attr, dsg_->graph->mapViewCount());
+      assignMaskToNode(centroids, node_id, object_attr, dsg_->graph->mapViewCount());
     }
   }
 }

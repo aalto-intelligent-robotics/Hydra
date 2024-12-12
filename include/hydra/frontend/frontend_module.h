@@ -65,7 +65,8 @@ namespace hydra {
 
 class NearestNodeFinder;
 
-using MaskDataAndCentroid = std::pair<std::shared_ptr<MaskData>, std::shared_ptr<Eigen::Vector3f>>;
+using MaskDataAndCentroid =
+    std::pair<std::shared_ptr<MaskData>, std::shared_ptr<Eigen::Vector3f>>;
 using MaskDataAndCentroidVec = std::vector<MaskDataAndCentroid>;
 using ClassIDtoMaskDataAndCentroid = std::unordered_map<int64, MaskDataAndCentroidVec>;
 
@@ -158,6 +159,11 @@ class FrontendModule : public Module {
 
   void updatePlaceMeshMapping(const ReconstructionOutput& input);
 
+  // TEST:
+  void assignMaskToNode(const ClassIDtoMaskDataAndCentroid& masks_and_centroids,
+                        const NodeId& node_id,
+                        spark_dsg::ObjectNodeAttributes& object_attr,
+                        uint16_t image_id);
   void assignMasksToObjectsInViewFrustum(const ReconstructionOutput& input);
 
  protected:
