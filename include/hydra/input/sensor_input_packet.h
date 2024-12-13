@@ -60,6 +60,7 @@ struct ImageInputPacket : public SensorInputPacket {
   cv::Mat color;
   cv::Mat depth;
   cv::Mat labels;
+  // instance masks, defined in hydra/input/input_data.h
   std::vector<MaskData> instance_masks;
   bool color_is_bgr = false; // Otherwise, color is RGB already.
 };

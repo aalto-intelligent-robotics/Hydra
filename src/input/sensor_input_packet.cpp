@@ -62,15 +62,6 @@ bool ImageInputPacket::fillInputData(InputData& msg) const {
   }
   msg.depth_image = depth;
   msg.label_image = labels;
-  // //! TEST: Check for mask data
-  // if (instance_masks.empty()) {
-  //   LOG(WARNING) << "Missing instance masks!";
-  // }
-  // else {
-  //   for (const auto& mask : instance_masks) {
-  //     LOG(INFO) << "Inputting mask of label " << mask.class_id;
-  //   }
-  // }
   msg.instance_masks = instance_masks;
   return true;
 }

@@ -216,11 +216,9 @@ void FrontendModule::save(const LogSetup& log_setup) {
   dsg_->graph->save(output_path + "/dsg.json", false);
   dsg_->graph->save(output_path + "/dsg_with_mesh.json");
 
-  //! TEST: Save map views
   const std::string& map_views_path = log_setup.getLogDir("map_views");
   dsg_->graph->saveMapViews(map_views_path);
 
-  //! TEST: Save instance views
   const auto output_instance_path = log_setup.getLogDir("instance_views");
   dsg_->graph->saveInstanceViews(output_instance_path);
   LOG(INFO) << "Saved instance views in " << output_instance_path;
@@ -439,10 +437,11 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
                             *dsg_->graph);
     addPlaceObjectEdges(input.timestamp_ns);
   }  // end dsg critical section
-  //! TEST: add image
+   
+  // start instance mask association
   dsg_->graph->addMapView(input.sensor_data->color_image);
-  //! TODO: add instance masks
   assignMasksToObjectsInViewFrustum(input);
+  // end instance mask association
 }
 
 using PgmoCloud = pcl::PointCloud<pcl::PointXYZRGBA>;
@@ -904,7 +903,6 @@ void FrontendModule::assignMaskToNode(
 
 FrontendModule::ClassToMaskDataAndCentroid FrontendModule::calculateInstanceCentroids(
     const ReconstructionOutput& input) {
-  // Map from class id to centroid
   ClassToMaskDataAndCentroid cls_to_centroids;
   cv::Mat vertex_map = input.sensor_data->vertex_map;
   std::vector<MaskData> instance_masks_data = input.sensor_data->instance_masks;

@@ -12,8 +12,15 @@
 
 namespace hydra {
 
+/**
+ * @class MaskData
+ * @brief Struct to hold instance information, in this case the binary mask and the
+ * class id
+ *
+ */
 struct MaskData {
   using Ptr = std::shared_ptr<MaskData>;
+  
   int64 class_id;
   cv::Mat mask;
 
@@ -50,7 +57,7 @@ struct InputData {
   // Label image for semantic input data.
   cv::Mat label_image;
 
-  //! TEST: Instance masks for each instance in the label image
+  // Instance masks for each instance in the label image
   std::vector<MaskData> instance_masks;
 
   // 3D points of the range image in sensor or world frame.

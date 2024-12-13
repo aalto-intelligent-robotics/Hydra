@@ -100,7 +100,22 @@ BlockIndices findBlocksInViewFrustum(
     float max_range = std::numeric_limits<float>::max(),
     bool use_sensor_range = true);
 
-// TODO: check if an object is in the view frustum of the camera
+/**
+ * @brief Checks if an object node is within the camera's view frustum. Does not check
+ * for occlusion
+ *
+ * @param sensor the camera object
+ * @param T_W_C Transform from (C)amera to (W)orld frame.
+ * @param min_range Optionally specify the minimum range to search for blocks in the
+ * view in meters
+ * @param max_range Optionally specify the maximum range to search for blocks in the
+ * view in meters
+ * @param node_attributes Attributes of the object node, containing semantic and
+ * geometric information
+ * @param use_sensor_range Whether to use the min/max range defined by the sensor config
+ * or use the optionally defined min/max range
+ * @return True if the object node can be seen in the camera's view frustum
+ */
 bool objectIsInViewFrustum(const Sensor& sensor,
                            const Eigen::Isometry3f& T_W_C,
                            float min_range,

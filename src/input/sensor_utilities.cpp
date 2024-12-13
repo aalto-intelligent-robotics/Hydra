@@ -117,7 +117,6 @@ bool objectIsInViewFrustum(const Sensor& sensor,
                            float max_range,
                            spark_dsg::ObjectNodeAttributes node_attributes,
                            bool use_sensor_range) {
-  // TEST: inherited from find blocks in view frustum
 
   // Transformation matrix from (W)orld frame to (C)amera frame.
   const auto T_C_W = T_W_C.inverse();
