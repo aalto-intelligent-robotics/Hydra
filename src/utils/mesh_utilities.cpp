@@ -34,7 +34,15 @@
  * -------------------------------------------------------------------------- */
 #include "hydra/utils/mesh_utilities.h"
 
+#include <glog/logging.h>
+#include <pcl/PointIndices.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
 #include <spark_dsg/bounding_box_extraction.h>
+
+#include <algorithm>
+#include <memory>
 
 namespace hydra {
 
@@ -61,6 +69,28 @@ bool updateNodeCentroid(const spark_dsg::Mesh& mesh,
   return true;
 }
 
+// TODO: Clean up mesh by removing outliers
+void removeMeshOutliers(BoundingBox::MeshAdaptor mesh_adaptor,
+                        pcl::PointIndices& removed_indices) {
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered(
+      new pcl::PointCloud<pcl::PointXYZ>);
+  for (const auto& index : *mesh_adaptor.indices) {
+    // LOG(INFO) << "Point: " << point.x() << " " << point.y() << " " << point.z();
+    const auto& point = mesh_adaptor.mesh.points[index];
+    cloud->push_back(pcl::PointXYZ(point.x(), point.y(), point.z()));
+  }
+  // Create the filtering object
+  pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor(true);
+  sor.setInputCloud(cloud);
+  sor.setMeanK(50);
+  sor.setStddevMulThresh(0.5);
+  sor.filter(*cloud_filtered);
+  sor.getRemovedIndices(removed_indices);
+  VLOG(5) << "Cloud b4 stat removal: " << cloud->size();
+  VLOG(5) << "Cloud af stat removal: " << cloud_filtered->size();
+}
+
 bool updateObjectGeometry(const spark_dsg::Mesh& mesh,
                           ObjectNodeAttributes& attrs,
                           const std::vector<size_t>* indices,
@@ -72,12 +102,24 @@ bool updateObjectGeometry(const spark_dsg::Mesh& mesh,
   }
 
   const BoundingBox::MeshAdaptor adaptor(mesh, indices ? indices : &mesh_connections);
+
+  pcl::PointIndices removed_indices;
+  removeMeshOutliers(adaptor, removed_indices);
+  VLOG(5) << "Removed indices size: " << removed_indices.indices.size();
+  std::sort(removed_indices.indices.rbegin(), removed_indices.indices.rend());
+  if (!indices) {
+    for (const auto& i : removed_indices.indices) {
+      mesh_connections.erase(mesh_connections.begin() + i);
+    }
+  }
+  VLOG(5) << "Mesh connections after outlier rm: "<< mesh_connections.size();
   attrs.bounding_box = BoundingBox(adaptor, type.value_or(attrs.bounding_box.type));
   if (indices) {
     return updateNodeCentroid(mesh, *indices, attrs);
   } else {
     return updateNodeCentroid(mesh, mesh_connections, attrs);
   }
+  // return updateNodeCentroid(mesh, mesh_connections, attrs);
 }
 
 MeshLayer::Ptr getActiveMesh(const MeshLayer& mesh_layer,

@@ -121,6 +121,7 @@ bool Camera::finalizeRepresentations(InputData& input, bool force_world_frame) c
                                       force_world_frame ? &world_T_camera : nullptr);
   if (force_world_frame) {
     input.points_in_world_frame = true;
+    LOG(INFO) << "Points in world frame: " << input.points_in_world_frame;
   }
 
   input.range_image =

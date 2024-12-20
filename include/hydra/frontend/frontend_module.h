@@ -50,6 +50,7 @@
 #include "hydra/frontend/freespace_places_interface.h"
 #include "hydra/frontend/frontier_places_interface.h"
 #include "hydra/frontend/mesh_segmenter.h"
+#include "hydra/frontend/instance_mesh_segmenter.h"
 #include "hydra/frontend/surface_places_interface.h"
 #include "hydra/input/sensor.h"
 #include "hydra/odometry/pose_graph_from_odom.h"
@@ -89,6 +90,7 @@ class FrontendModule : public Module {
       double time_horizon = 10.0;
     } pgmo;
     MeshSegmenter::Config object_config;
+    //! TEST: Try instance segmenting
     config::VirtualConfig<PoseGraphTracker> pose_graph_tracker{
         PoseGraphFromOdom::Config()};
     config::VirtualConfig<SurfacePlacesInterface> surface_places;
@@ -175,18 +177,28 @@ class FrontendModule : public Module {
                         const NodeId& node_id,
                         spark_dsg::ObjectNodeAttributes& object_attr,
                         uint16_t image_id);
+  using CloudPoint = pcl::PointXYZ;
+  using MeshCloud = pcl::PointCloud<CloudPoint>;
+  using InstanceView = std::pair<MaskData::Ptr, MeshCloud::Ptr>;
+  using InstanceViewVec = std::vector<InstanceView>;
+  using ClassToInstanceViews = std::unordered_map<int64, InstanceViewVec>;
+  void assignMaskToNodeChamfer(const ClassToInstanceViews& instance_views,
+                               const NodeId& node_id,
+                               spark_dsg::ObjectNodeAttributes& object_attr,
+                               uint16_t image_id);
   /**
-   * @brief Calculate the centroids for all instances. Apply each mask on the vertex map
-   * of calculated in calculateVertexMap@hydra/input/camera.cpp and get the instance
-   * centroids
+   * @brief Calculate the centroids for all instances. Apply each mask on the vertex
+   * map of calculated in calculateVertexMap@hydra/input/camera.cpp and get the
+   * instance centroids
    *
-   * @param input output of ReconstructionModule, containing sensor data, vertex map,
-   * etc.
+   * @param input output of ReconstructionModule, containing sensor data, vertex
+   * map, etc.
    * @return an unordered map that maps the class id to the masks and
    * centroids to support mapping instances with the same categories
    */
   ClassToMaskDataAndCentroid calculateInstanceCentroids(
       const ReconstructionOutput& input);
+  ClassToInstanceViews calculateInstanceViews(const ReconstructionOutput& input);
   /**
    * @brief Get all object nodes within the camera's viewing frustum, then assign
    * instance masks to them

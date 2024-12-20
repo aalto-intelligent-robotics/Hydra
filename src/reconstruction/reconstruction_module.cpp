@@ -185,7 +185,8 @@ bool ReconstructionModule::update(const InputPacket& msg, bool full_update) {
   VLOG(2) << "[Hydra Reconstruction] starting " << ((full_update) ? "full" : "partial")
           << " update @ " << msg.timestamp_ns << " [ns]";
 
-  InputData::Ptr data = conversions::parseInputPacket(msg);
+  //! FIX: convert vertex map to world frame
+  InputData::Ptr data = conversions::parseInputPacket(msg, true);
   if (!data) {
     return false;
   }

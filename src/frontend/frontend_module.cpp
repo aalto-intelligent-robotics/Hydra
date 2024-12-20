@@ -39,11 +39,13 @@
 #include <config_utilities/printing.h>
 #include <config_utilities/validation.h>
 #include <glog/logging.h>
+#include <hydra/utils/cloud_distance.h>
 #include <kimera_pgmo/compression/block_compression.h>
 #include <kimera_pgmo/compression/delta_compression.h>
 #include <kimera_pgmo/utils/common_functions.h>
 #include <kimera_pgmo/utils/mesh_io.h>
 #include <opencv2/core/hal/interface.h>
+#include <pcl/io/pcd_io.h>
 #include <spark_dsg/dynamic_scene_graph.h>
 #include <spark_dsg/instance_views.h>
 #include <spark_dsg/node_attributes.h>
@@ -58,6 +60,7 @@
 #include <memory>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
+#include <opencv2/core/matx.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -437,10 +440,10 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
                             *dsg_->graph);
     addPlaceObjectEdges(input.timestamp_ns);
   }  // end dsg critical section
-   
+
   // start instance mask association
   dsg_->graph->addMapView(input.sensor_data->color_image);
-  assignMasksToObjectsInViewFrustum(input);
+  // assignMasksToObjectsInViewFrustum(input);
   // end instance mask association
 }
 
@@ -859,6 +862,75 @@ void FrontendModule::updatePlaceMeshMapping(const ReconstructionOutput& input) {
                               << " [ns]";
 }
 
+void FrontendModule::assignMaskToNodeChamfer(
+    const ClassToInstanceViews& instance_views,
+    const NodeId& node_id,
+    spark_dsg::ObjectNodeAttributes& object_attr,
+    uint16_t image_id) {
+  // NOTE: Obtain object mesh
+  MeshCloud::Ptr object_node_pcl_mesh(new MeshCloud);
+  for (const size_t& mesh_index : object_attr.mesh_connections) {
+    const auto& point = dsg_->graph->mesh()->points[mesh_index];
+    object_node_pcl_mesh->push_back(pcl::PointXYZ(point.x(), point.y(), point.z()));
+  }
+
+  const uint8_t& class_id = object_attr.semantic_label;
+  //! TEST: Threshold on chamfer distance
+  double min_distance = std::numeric_limits<float>::infinity();
+  std::shared_ptr<cv::Mat> mask_to_assign;
+  bool has_mask_to_assign = false;
+
+  //! TODO: Use Hausdorff distance instead
+  if (instance_views.find(class_id) != instance_views.end()) {
+    for (const auto& instance_view : instance_views.at(class_id)) {
+      const auto mask_data = instance_view.first;
+      const MeshCloud::Ptr instance_mesh = instance_view.second;
+
+      float distance = chamferDistance(instance_mesh, object_node_pcl_mesh);
+      if (distance < min_distance) {
+        min_distance = distance;
+        mask_to_assign = std::make_shared<cv::Mat>(mask_data->mask);
+        has_mask_to_assign = true;
+      }
+      // //! BUG: Debugging by viewing cloud (Somehow instance views only have 1 point????)
+      // if (dsg_->graph->mapViewCount() == 72) {
+      //   MeshCloud point_viz_a = *instance_mesh;
+      //   for (auto pt : instance_mesh->points) {
+      //     LOG(INFO) << "POINT: " << pt.x << " " << pt.y << " " << pt.z;
+      //   }
+      //   MeshCloud point_viz_b = *object_node_pcl_mesh;
+      //   for (auto pt : object_node_pcl_mesh->points) {
+      //     LOG(INFO) << "POINT NODE: " << pt.x << " " << pt.y << " " << pt.z;
+      //   }
+      //   MeshCloud point_viz_c = point_viz_a + point_viz_b;
+      //   std::string filename_a =
+      //       "/home/ros/debug/" + std::to_string(distance) + "_inst" + ".pcd";
+      //   std::string filename_b =
+      //       "/home/ros/debug/" + std::to_string(distance) + "_node" + ".pcd";
+      //   std::string filename_c = "/home/ros/debug/" + std::to_string(distance) + ".pcd";
+      //   pcl::io::savePCDFileASCII(filename_a, point_viz_a);
+      //   pcl::io::savePCDFileASCII(filename_b, point_viz_b);
+      //   pcl::io::savePCDFileASCII(filename_c, point_viz_c);
+      //   LOG(INFO) << "SAVED " << filename_a;
+      // }
+    }
+  } else {
+    // LOG(INFO) << "No instance views with the class ID: " << class_id;
+  }
+  if (has_mask_to_assign) {
+    object_attr.instance_views.add_view(image_id, *mask_to_assign);
+    NodeAttributes::Ptr object_attr_assign = object_attr.clone();
+    dsg_->graph->addOrUpdateNode(
+        DsgLayers::OBJECTS, node_id, std::move(object_attr_assign));
+    LOG(INFO) << "Assigned mask to instance: " << object_attr.name << " at view "
+              << image_id << " with Chamfer distance: " << min_distance;
+  } else {
+    // LOG(INFO) << "Couldn't assign mask to instance: " << object_attr.name << " at
+    // view "
+    //           << image_id;
+  }
+}
+
 void FrontendModule::assignMaskToNode(
     const ClassToMaskDataAndCentroid& masks_and_centroids,
     const NodeId& node_id,
@@ -874,19 +946,22 @@ void FrontendModule::assignMaskToNode(
     for (const auto& mask_data_and_centroid : masks_and_centroids.at(class_id)) {
       const auto mask_data = mask_data_and_centroid.first;
       const auto instance_centroid = mask_data_and_centroid.second;
-
-      float distance = (*instance_centroid - object_node_centroid).norm();
-      if (distance < min_distance) {
-        min_distance = distance;
+      if (object_attr.bounding_box.contains(*instance_centroid)) {
         mask_to_assign = std::make_shared<cv::Mat>(mask_data->mask);
-        VLOG(2) << "Mask to assign data mask w: " << mask_to_assign->rows
-                << " h: " << mask_to_assign->cols;
         has_mask_to_assign = true;
       }
+
+      // float distance = (*instance_centroid - object_node_centroid).norm();
+      // if (distance < min_distance) {
+      //   min_distance = distance;
+      //   mask_to_assign = std::make_shared<cv::Mat>(mask_data->mask);
+      //   VLOG(2) << "Mask to assign data mask w: " << mask_to_assign->rows
+      //           << " h: " << mask_to_assign->cols;
+      //   has_mask_to_assign = true;
+      // }
     }
   } else {
-    VLOG(2) << "Found no masks with centroids close enough to assign to instance: "
-            << object_attr.name << " at view " << image_id;
+    VLOG(2) << "No instance views with the class ID: " << class_id;
   }
   if (has_mask_to_assign) {
     object_attr.instance_views.add_view(image_id, *mask_to_assign);
@@ -929,10 +1004,67 @@ FrontendModule::ClassToMaskDataAndCentroid FrontendModule::calculateInstanceCent
   }
   return cls_to_centroids;
 }
+FrontendModule::ClassToInstanceViews FrontendModule::calculateInstanceViews(
+    const ReconstructionOutput& input) {
+
+  const cv::Mat& vertex_map = input.sensor_data->vertex_map;
+  const int& rows = vertex_map.size().height;
+  const int& cols = vertex_map.size().width;
+  //
+  // //! BUG: start debugging part
+  // if (dsg_->graph->mapViewCount() == 100) {
+  //   MeshCloud::Ptr frustum_cloud(new MeshCloud);
+  //   MeshCloud::Ptr mesh_cloud(new MeshCloud);
+  //   for (int r = 0; r < rows; r++) {
+  //     for (int c = 0; c < cols; c++) {
+  //       auto point = vertex_map.at<cv::Vec3f>(r, c);
+  //       frustum_cloud->push_back(CloudPoint(point[0], point[1], point[2]));
+  //     }
+  //   }
+  //   for (auto point : dsg_->graph->mesh()->points) {
+  //     mesh_cloud->push_back(CloudPoint(point[0], point[1], point[2]));
+  //   }
+  //   pcl::io::savePCDFileASCII("/home/ros/debug/frustum_cloud100.pcd", *frustum_cloud);
+  //   pcl::io::savePCDFileASCII("/home/ros/debug/mesh_cloud100.pcd", *mesh_cloud);
+  // }
+  // //! BUG: end debugging part
+
+  ClassToInstanceViews cls_to_instance_views;
+  std::vector<MaskData> instance_masks_data = input.sensor_data->instance_masks;
+
+  for (const auto& mask_data : instance_masks_data) {
+    MeshCloud::Ptr mesh_ptr(new MeshCloud);
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        if (mask_data.mask.at<uint8_t>(r, c) != 0) {
+          auto point = vertex_map.at<cv::Vec3f>(r, c);
+          mesh_ptr->push_back(CloudPoint(point[0], point[1], point[2]));
+        }
+      }
+    }
+
+    auto mask_data_ptr = std::make_shared<MaskData>(mask_data);
+    auto instance_view = std::make_pair(mask_data_ptr, mesh_ptr);
+
+    int64 class_id = mask_data.class_id;
+
+    if (cls_to_instance_views.find(class_id) == cls_to_instance_views.end()) {
+      InstanceViewVec view_vec;
+      view_vec.push_back(instance_view);
+      cls_to_instance_views.insert(std::make_pair(class_id, view_vec));
+      // LOG(INFO) << "Added new mask with label: " << mask_data.class_id;
+    } else {
+      cls_to_instance_views.at(mask_data.class_id).push_back(instance_view);
+      // LOG(INFO) << "Appended new mask with label: " << mask_data.class_id;
+    }
+  }
+  return cls_to_instance_views;
+}
 
 void FrontendModule::assignMasksToObjectsInViewFrustum(
     const ReconstructionOutput& input) {
-  const auto centroids = calculateInstanceCentroids(input);
+  // const auto centroids = calculateInstanceCentroids(input);
+  const auto instance_views = calculateInstanceViews(input);
 
   std::vector<MaskData> masks_data = input.sensor_data->instance_masks;
   for (auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
@@ -943,7 +1075,9 @@ void FrontendModule::assignMasksToObjectsInViewFrustum(
                               input.sensor_data->min_range,
                               input.sensor_data->max_range,
                               object_attr)) {
-      assignMaskToNode(centroids, node_id, object_attr, dsg_->graph->mapViewCount());
+      // assignMaskToNode(centroids, node_id, object_attr, dsg_->graph->mapViewCount());
+      assignMaskToNodeChamfer(
+          instance_views, node_id, object_attr, dsg_->graph->mapViewCount());
     }
   }
 }

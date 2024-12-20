@@ -33,6 +33,8 @@
  * purposes notwithstanding any copyright notation herein.
  * -------------------------------------------------------------------------- */
 #pragma once
+#include <spark_dsg/node_attributes.h>
+
 #include <optional>
 #include <vector>
 
@@ -49,7 +51,11 @@ bool updateObjectGeometry(const spark_dsg::Mesh& mesh,
                           ObjectNodeAttributes& attrs,
                           const std::vector<size_t>* indices = nullptr,
                           std::optional<BoundingBox::Type> type = std::nullopt);
-                          
+
+// void removeMeshOutliers(const spark_dsg::Mesh& mesh,
+//                         ObjectNodeAttributes& attrs,
+//                         std::optional<BoundingBox::Type> type = std::nullopt);
+
 MeshLayer::Ptr getActiveMesh(const MeshLayer& mesh_layer,
                              const BlockIndices& archived_blocks);
 
