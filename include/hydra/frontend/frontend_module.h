@@ -50,7 +50,6 @@
 #include "hydra/frontend/freespace_places_interface.h"
 #include "hydra/frontend/frontier_places_interface.h"
 #include "hydra/frontend/mesh_segmenter.h"
-#include "hydra/frontend/instance_mesh_segmenter.h"
 #include "hydra/frontend/surface_places_interface.h"
 #include "hydra/input/sensor.h"
 #include "hydra/odometry/pose_graph_from_odom.h"
