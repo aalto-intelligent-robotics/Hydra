@@ -231,7 +231,8 @@ MeshSegmenter::MeshSegmenter(const Config& config)
 
 LabelClusters MeshSegmenter::detect(uint64_t timestamp_ns,
                                     const kimera_pgmo::MeshDelta& delta,
-                                    const std::optional<Eigen::Vector3d>& pos) {
+                                    const std::optional<Eigen::Vector3d>& pos,
+                                    const ReconstructionOutput& input) {
   const auto timer_name = config.timer_namespace + "_detection";
   ScopedTimer timer(timer_name, timestamp_ns, true, 1, false);
 
@@ -243,6 +244,9 @@ LabelClusters MeshSegmenter::detect(uint64_t timestamp_ns,
     return label_clusters;
   }
 
+  // TODO: instead of label_indices, get also instance indices {label -> {indices1,
+  // indices2, ...}} create mesh in view frustum, use knearestsearch with k = 1 to
+  // search for closest point, get instance local_id then map to the class label
   const auto label_indices = getLabelIndices(config, delta, indices);
   if (label_indices.empty()) {
     VLOG(2) << "[Mesh Segmenter] No vertices found matching desired labels";

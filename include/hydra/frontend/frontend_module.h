@@ -50,7 +50,6 @@
 #include "hydra/frontend/freespace_places_interface.h"
 #include "hydra/frontend/frontier_places_interface.h"
 #include "hydra/frontend/mesh_segmenter.h"
-#include "hydra/frontend/instance_mesh_segmenter.h"
 #include "hydra/frontend/surface_places_interface.h"
 #include "hydra/input/sensor.h"
 #include "hydra/odometry/pose_graph_from_odom.h"
@@ -80,6 +79,12 @@ class FrontendModule : public Module {
   using MaskDataAndCentroid = std::pair<MaskData::Ptr, CentroidPtr>;
   using MaskDataAndCentroidVec = std::vector<MaskDataAndCentroid>;
   using ClassToMaskDataAndCentroid = std::unordered_map<int64, MaskDataAndCentroidVec>;
+
+  using CloudPoint = pcl::PointXYZ;
+  using MeshCloud = pcl::PointCloud<CloudPoint>;
+  using InstanceView = std::pair<MaskData::Ptr, MeshCloud::Ptr>;
+  using InstanceViewVec = std::vector<InstanceView>;
+  using ClassToInstanceViews = std::unordered_map<int64, InstanceViewVec>;
 
   struct Config {
     size_t min_object_vertices = 20;
@@ -177,11 +182,7 @@ class FrontendModule : public Module {
                         const NodeId& node_id,
                         spark_dsg::ObjectNodeAttributes& object_attr,
                         uint16_t image_id);
-  using CloudPoint = pcl::PointXYZ;
-  using MeshCloud = pcl::PointCloud<CloudPoint>;
-  using InstanceView = std::pair<MaskData::Ptr, MeshCloud::Ptr>;
-  using InstanceViewVec = std::vector<InstanceView>;
-  using ClassToInstanceViews = std::unordered_map<int64, InstanceViewVec>;
+  //! TODO: Document this
   void assignMaskToNodeChamfer(const ClassToInstanceViews& instance_views,
                                const NodeId& node_id,
                                spark_dsg::ObjectNodeAttributes& object_attr,

@@ -430,7 +430,7 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
   }
 
   const auto clusters =
-      segmenter_->detect(input.timestamp_ns, *last_mesh_update_, std::nullopt);
+      segmenter_->detect(input.timestamp_ns, *last_mesh_update_, std::nullopt, input);
 
   {  // start dsg critical section
     std::unique_lock<std::mutex> lock(dsg_->mutex);
@@ -892,8 +892,8 @@ void FrontendModule::assignMaskToNodeChamfer(
         mask_to_assign = std::make_shared<cv::Mat>(mask_data->mask);
         has_mask_to_assign = true;
       }
-      // //! BUG: Debugging by viewing cloud (Somehow instance views only have 1 point????)
-      // if (dsg_->graph->mapViewCount() == 72) {
+      // //! BUG: Debugging by viewing cloud (Somehow instance views only have 1
+      // point????) if (dsg_->graph->mapViewCount() == 72) {
       //   MeshCloud point_viz_a = *instance_mesh;
       //   for (auto pt : instance_mesh->points) {
       //     LOG(INFO) << "POINT: " << pt.x << " " << pt.y << " " << pt.z;
@@ -907,8 +907,8 @@ void FrontendModule::assignMaskToNodeChamfer(
       //       "/home/ros/debug/" + std::to_string(distance) + "_inst" + ".pcd";
       //   std::string filename_b =
       //       "/home/ros/debug/" + std::to_string(distance) + "_node" + ".pcd";
-      //   std::string filename_c = "/home/ros/debug/" + std::to_string(distance) + ".pcd";
-      //   pcl::io::savePCDFileASCII(filename_a, point_viz_a);
+      //   std::string filename_c = "/home/ros/debug/" + std::to_string(distance) +
+      //   ".pcd"; pcl::io::savePCDFileASCII(filename_a, point_viz_a);
       //   pcl::io::savePCDFileASCII(filename_b, point_viz_b);
       //   pcl::io::savePCDFileASCII(filename_c, point_viz_c);
       //   LOG(INFO) << "SAVED " << filename_a;
@@ -1006,7 +1006,6 @@ FrontendModule::ClassToMaskDataAndCentroid FrontendModule::calculateInstanceCent
 }
 FrontendModule::ClassToInstanceViews FrontendModule::calculateInstanceViews(
     const ReconstructionOutput& input) {
-
   const cv::Mat& vertex_map = input.sensor_data->vertex_map;
   const int& rows = vertex_map.size().height;
   const int& cols = vertex_map.size().width;
@@ -1024,8 +1023,9 @@ FrontendModule::ClassToInstanceViews FrontendModule::calculateInstanceViews(
   //   for (auto point : dsg_->graph->mesh()->points) {
   //     mesh_cloud->push_back(CloudPoint(point[0], point[1], point[2]));
   //   }
-  //   pcl::io::savePCDFileASCII("/home/ros/debug/frustum_cloud100.pcd", *frustum_cloud);
-  //   pcl::io::savePCDFileASCII("/home/ros/debug/mesh_cloud100.pcd", *mesh_cloud);
+  //   pcl::io::savePCDFileASCII("/home/ros/debug/frustum_cloud100.pcd",
+  //   *frustum_cloud); pcl::io::savePCDFileASCII("/home/ros/debug/mesh_cloud100.pcd",
+  //   *mesh_cloud);
   // }
   // //! BUG: end debugging part
 

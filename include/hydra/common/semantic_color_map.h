@@ -35,8 +35,8 @@
 #pragma once
 
 #include <iostream>
-#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -50,18 +50,19 @@ class SemanticColorMap {
  public:
   using Ptr = std::unique_ptr<SemanticColorMap>;
   using ColorSet = std::unordered_set<Color, Color::Hash>;
-  using LabelToColorMap = std::unordered_map<uint32_t, Color>;
-  using ColorToLabelMap = std::unordered_map<Color, uint32_t, Color::Hash>;
+  using InstanceToColorMap = std::unordered_map<uint32_t, Color>;
+  using ColorToInstanceMap = std::unordered_map<Color, uint32_t, Color::Hash>;
 
   SemanticColorMap();
 
-  SemanticColorMap(const ColorToLabelMap& map, const Color& unknown_color = {});
+  SemanticColorMap(const ColorToInstanceMap& color_to_instance,
+                   const Color& unknown = {});
 
-  std::optional<uint32_t> getLabelFromColor(const Color& color) const;
+  std::optional<uint32_t> getInstanceFromColor(const Color& color) const;
 
-  Color getColorFromLabel(const uint32_t& label) const;
+  Color getColorFromInstance(const uint32_t& instance) const;
 
-  size_t getNumLabels() const;
+  size_t getNumInstances() const;
 
   bool isValid() const;
 
@@ -70,21 +71,22 @@ class SemanticColorMap {
   std::string toString() const;
 
  public:
-  static SemanticColorMap::Ptr randomColors(size_t num_labels,
+  static SemanticColorMap::Ptr randomColors(size_t num_instances,
                                             const Color& unknown = {});
 
   static SemanticColorMap::Ptr fromCsv(const std::string& filename,
                                        const Color& unknown = {},
                                        char delimiter = ',',
                                        bool skip_first_line = true);
+
  private:
-  uint32_t max_label_;
-  ColorToLabelMap color_to_label_;
-  LabelToColorMap label_to_color_;
+  uint32_t max_instance_;
+  ColorToInstanceMap color_to_instance_;
+  InstanceToColorMap instance_to_color_;
   Color unknown_color_;
 
   mutable ColorSet unknown_colors_;
-  mutable std::unordered_set<uint32_t> unknown_labels_;
+  mutable std::unordered_set<uint32_t> unknown_instances_;
 };
 
 std::ostream& operator<<(std::ostream& out, const SemanticColorMap& cmap);

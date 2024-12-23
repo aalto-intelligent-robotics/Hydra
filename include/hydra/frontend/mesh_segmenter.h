@@ -37,6 +37,7 @@
 
 #include "hydra/common/dsg_types.h"
 #include "hydra/common/output_sink.h"
+#include "hydra/reconstruction/reconstruction_output.h"
 
 namespace kimera_pgmo {
 class MeshDelta;
@@ -78,7 +79,8 @@ class MeshSegmenter {
 
   LabelClusters detect(uint64_t timestamp_ns,
                        const kimera_pgmo::MeshDelta& active,
-                       const std::optional<Eigen::Vector3d>& pos);
+                       const std::optional<Eigen::Vector3d>& pos,
+                       const ReconstructionOutput& input);
 
   void updateGraph(uint64_t timestamp,
                    const LabelClusters& clusters,
@@ -87,7 +89,7 @@ class MeshSegmenter {
 
   std::unordered_set<NodeId> getActiveNodes() const;
 
- private:
+ protected:
   void archiveOldNodes(const DynamicSceneGraph& graph, size_t num_archived_vertices);
 
   void addNodeToGraph(DynamicSceneGraph& graph,
@@ -102,12 +104,20 @@ class MeshSegmenter {
 
   void mergeActiveNodes(DynamicSceneGraph& graph, uint32_t label);
 
- private:
+ protected:
   NodeSymbol next_node_id_;
   std::map<uint32_t, std::set<NodeId>> active_nodes_;
   Sink::List sinks_;
 };
 
 void declare_config(MeshSegmenter::Config& config);
-
+std::vector<size_t> getActiveIndices(const kimera_pgmo::MeshDelta& delta,
+                                     const std::optional<Eigen::Vector3d>& pos,
+                                     double horizon_m);
+LabelIndices getLabelIndices(const MeshSegmenter::Config& config,
+                             const kimera_pgmo::MeshDelta& delta,
+                             const std::vector<size_t>& indices);
+MeshSegmenter::Clusters findClusters(const MeshSegmenter::Config& config,
+                                     const kimera_pgmo::MeshDelta& delta,
+                                     const std::vector<size_t>& indices);
 }  // namespace hydra
