@@ -171,8 +171,9 @@ class FrontendModule : public Module {
    * @param node_id the node ID
    * @param object_attr attributes of the scene graph object node
    * @param image_id The map view ID (MapView defined in spark_dsg)
+   * @return True if a mask was successfully assigned to the node
    */
-  void assignMaskToNode(const ClassToMaskDataAndCentroid& masks_and_centroids,
+  bool assignMaskToNode(const ClassToMaskDataAndCentroid& masks_and_centroids,
                         const NodeId& node_id,
                         spark_dsg::ObjectNodeAttributes& object_attr,
                         uint16_t image_id);
@@ -185,6 +186,7 @@ class FrontendModule : public Module {
                                const NodeId& node_id,
                                spark_dsg::ObjectNodeAttributes& object_attr,
                                uint16_t image_id);
+  void removeNodesWithoutInstanceViews();
   /**
    * @brief Calculate the centroids for all instances. Apply each mask on the vertex
    * map of calculated in calculateVertexMap@hydra/input/camera.cpp and get the

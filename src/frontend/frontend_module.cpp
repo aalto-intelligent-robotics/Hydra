@@ -445,6 +445,7 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
   dsg_->graph->addMapView(input.sensor_data->color_image);
   assignMasksToObjectsInViewFrustum(input);
   // end instance mask association
+  removeNodesWithoutInstanceViews();
 }
 
 using PgmoCloud = pcl::PointCloud<pcl::PointXYZRGBA>;
@@ -909,8 +910,8 @@ void FrontendModule::assignMaskToNodeChamfer(
       //       "/home/ros/debug/" + std::to_string(distance) + "_inst" + ".pcd";
       //   std::string filename_b =
       //       "/home/ros/debug/" + std::to_string(distance) + "_node" + ".pcd";
-      //   std::string filename_c = "/home/ros/debug/" + std::to_string(distance) + ".pcd";
-      //   pcl::io::savePCDFileASCII(filename_a, point_viz_a);
+      //   std::string filename_c = "/home/ros/debug/" + std::to_string(distance) +
+      //   ".pcd"; pcl::io::savePCDFileASCII(filename_a, point_viz_a);
       //   pcl::io::savePCDFileASCII(filename_b, point_viz_b);
       //   pcl::io::savePCDFileASCII(filename_c, point_viz_c);
       //   LOG(INFO) << "SAVED " << filename_a;
@@ -932,14 +933,14 @@ void FrontendModule::assignMaskToNodeChamfer(
   }
 }
 
-void FrontendModule::assignMaskToNode(
+bool FrontendModule::assignMaskToNode(
     const ClassToMaskDataAndCentroid& masks_and_centroids,
     const NodeId& node_id,
     spark_dsg::ObjectNodeAttributes& object_attr,
     uint16_t image_id) {
-  const Centroid& object_node_centroid = object_attr.bounding_box.world_P_center;
+  // const Centroid& object_node_centroid = object_attr.bounding_box.world_P_center;
   const uint8_t& class_id = object_attr.semantic_label;
-  float min_distance = std::numeric_limits<float>::infinity();
+  // float min_distance = std::numeric_limits<float>::infinity();
   std::shared_ptr<cv::Mat> mask_to_assign;
   bool has_mask_to_assign = false;
 
@@ -975,6 +976,7 @@ void FrontendModule::assignMaskToNode(
     VLOG(2) << "Couldn't assign mask to instance: " << object_attr.name << " at view "
             << image_id;
   }
+  return has_mask_to_assign;
 }
 
 FrontendModule::ClassToMaskDataAndCentroid FrontendModule::calculateInstanceCentroids(
@@ -1062,8 +1064,9 @@ FrontendModule::ClassToInstanceViews FrontendModule::calculateInstanceViews(
   //   for (auto point : dsg_->graph->mesh()->points) {
   //     mesh_cloud->push_back(CloudPoint(point[0], point[1], point[2]));
   //   }
-  //   pcl::io::savePCDFileASCII("/home/ros/debug/frustum_cloud100.pcd", *frustum_cloud);
-  //   pcl::io::savePCDFileASCII("/home/ros/debug/mesh_cloud100.pcd", *mesh_cloud);
+  //   pcl::io::savePCDFileASCII("/home/ros/debug/frustum_cloud100.pcd",
+  //   *frustum_cloud); pcl::io::savePCDFileASCII("/home/ros/debug/mesh_cloud100.pcd",
+  //   *mesh_cloud);
   // }
   // //! BUG: end debugging part
 
@@ -1116,6 +1119,20 @@ void FrontendModule::assignMasksToObjectsInViewFrustum(
       // assignMaskToNodeChamfer(
       //     instance_views, node_id, object_attr, dsg_->graph->mapViewCount());
     }
+  }
+}
+
+void FrontendModule::removeNodesWithoutInstanceViews() {
+  std::vector<NodeId> nodes_to_remove;
+  for (const auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
+    NodeId node_id = node.first;
+    ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
+    if (object_attr.instance_views.id_to_instance_masks.empty()) {
+      nodes_to_remove.push_back(node_id);
+    }
+  }
+  for (const auto& node_id : nodes_to_remove) {
+    dsg_->graph->removeNode(node_id);
   }
 }
 
