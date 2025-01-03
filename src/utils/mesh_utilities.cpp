@@ -37,6 +37,7 @@
 #include <glog/logging.h>
 #include <pcl/PointIndices.h>
 #include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <spark_dsg/bounding_box_extraction.h>
@@ -112,7 +113,7 @@ bool updateObjectGeometry(const spark_dsg::Mesh& mesh,
       mesh_connections.erase(mesh_connections.begin() + i);
     }
   }
-  VLOG(5) << "Mesh connections after outlier rm: "<< mesh_connections.size();
+  VLOG(5) << "Mesh connections after outlier rm: " << mesh_connections.size();
   attrs.bounding_box = BoundingBox(adaptor, type.value_or(attrs.bounding_box.type));
   if (indices) {
     return updateNodeCentroid(mesh, *indices, attrs);

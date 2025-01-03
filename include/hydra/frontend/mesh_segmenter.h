@@ -34,9 +34,13 @@
  * -------------------------------------------------------------------------- */
 #pragma once
 #include <memory>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
 
 #include "hydra/common/dsg_types.h"
 #include "hydra/common/output_sink.h"
+#include "hydra/input/input_data.h"
+#include "hydra/reconstruction/reconstruction_output.h"
 
 namespace kimera_pgmo {
 class MeshDelta;
@@ -47,6 +51,8 @@ namespace hydra {
 struct Cluster {
   Eigen::Vector3d centroid;
   std::vector<size_t> indices;
+  pcl::PointCloud<pcl::PointXYZRGBA> mesh;
+  MaskData mask;
 };
 
 using LabelIndices = std::map<uint32_t, std::vector<size_t>>;
@@ -76,7 +82,8 @@ class MeshSegmenter {
 
   explicit MeshSegmenter(const Config& config);
 
-  LabelClusters detect(uint64_t timestamp_ns,
+  LabelClusters detect(const ReconstructionOutput& input,
+                       uint64_t timestamp_ns,
                        const kimera_pgmo::MeshDelta& active,
                        const std::optional<Eigen::Vector3d>& pos);
 

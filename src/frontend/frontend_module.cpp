@@ -46,6 +46,10 @@
 #include <kimera_pgmo/utils/mesh_io.h>
 #include <opencv2/core/hal/interface.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/search/kdtree.h>
+#define PCL_NO_PRECOMPILE
+#include <pcl/segmentation/extract_clusters.h>
+#undef PCL_NO_PRECOMPILE
 #include <spark_dsg/dynamic_scene_graph.h>
 #include <spark_dsg/instance_views.h>
 #include <spark_dsg/node_attributes.h>
@@ -64,6 +68,7 @@
 #include <opencv2/core/types.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <pcl/impl/point_types.hpp>
 #include <string>
 #include <utility>
 
@@ -422,15 +427,24 @@ void FrontendModule::updateMesh(const ReconstructionOutput& input) {
       "frontend/launch_postmesh_callbacks", input.timestamp_ns, true, 1, false);
   launchCallbacks(post_mesh_callbacks_, input);
 }
-
 void FrontendModule::updateObjects(const ReconstructionOutput& input) {
   if (!last_mesh_update_) {
     LOG(ERROR) << "Cannot detect objects without valid mesh";
     return;
   }
 
+  dsg_->graph->addMapView(input.sensor_data->color_image);
   const auto clusters =
-      segmenter_->detect(input.timestamp_ns, *last_mesh_update_, std::nullopt);
+      segmenter_->detect(input, input.timestamp_ns, *last_mesh_update_, std::nullopt);
+
+  // //! BUG: Debugging by viewing cloud
+  // if (dsg_->graph->mapViewCount() == 10) {
+  //   std::string filename =
+  //       "/home/ros/debug/" + std::to_string(dsg_->graph->mapViewCount()) + ".pcd";
+  //   pcl::io::savePCDFileASCII(filename, *(last_mesh_update_->vertex_updates));
+  //   findInstancesClusters(input, segmenter_->config);
+  // }
+  // //! BUG: End debugging part
 
   {  // start dsg critical section
     std::unique_lock<std::mutex> lock(dsg_->mutex);
@@ -442,10 +456,10 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
   }  // end dsg critical section
 
   // start instance mask association
-  dsg_->graph->addMapView(input.sensor_data->color_image);
-  assignMasksToObjectsInViewFrustum(input);
   // end instance mask association
-  removeNodesWithoutInstanceViews();
+  //! TEST: Try to assign mask with segmenter so turning this off
+  // assignMasksToObjectsInViewFrustum(input);
+  // removeNodesWithoutInstanceViews();
 }
 
 using PgmoCloud = pcl::PointCloud<pcl::PointXYZRGBA>;
