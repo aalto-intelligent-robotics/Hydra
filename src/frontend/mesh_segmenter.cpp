@@ -44,12 +44,14 @@
 #include <spark_dsg/mesh.h>
 #include <spark_dsg/node_attributes.h>
 #include <spark_dsg/scene_graph_node.h>
+#include <spark_dsg/scene_graph_types.h>
 
 #include <boost/iostreams/categories.hpp>
 #include <boost/mpl/size.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -142,7 +144,7 @@ inline bool nodesMatch(const SceneGraphNode& lhs_node, const SceneGraphNode& rhs
   auto& lhs_node_attr = lhs_node.attributes<ObjectNodeAttributes>();
   auto& rhs_node_attr = rhs_node.attributes<ObjectNodeAttributes>();
   // if (lhs_node_attr.bounding_box.type == spark_dsg::BoundingBox::Type::AABB) {
-  //   float bbox_iou_thresh = 0.8;
+  //   float bbox_iou_thresh = 0.5;
   //   return lhs_node_attr.bounding_box.computeIoU(rhs_node_attr.bounding_box) >
   //          bbox_iou_thresh;
   // }
@@ -219,6 +221,10 @@ LabelIndices getLabelIndices(const MeshSegmenter::Config& config,
 // TEST: get instances cluster, then use extractIndices to find inliers within mesh
 // updates
 
+float l2_norm_sq(const CloudPoint& a, const CloudPoint& b) {
+  return std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) + std::pow(a.z - b.z, 2);
+}
+
 MeshCloud::Ptr downsampleCloud(MeshCloud::Ptr cloud, float vox_size) {
   // Downsample
   MeshCloud::Ptr cloud_downsampled(new MeshCloud);
@@ -240,6 +246,81 @@ MeshCloud::Ptr cloudStatisticalOutlierRemoval(MeshCloud::Ptr cloud,
   sor.setStddevMulThresh(stddev_mul_thresh);
   sor.filter(*cloud_filtered);
   return cloud_filtered;
+}
+
+void euclideanClustering(MeshCloud::Ptr cloud_ptr,
+                         std::vector<pcl::PointIndices>& cluster_indices,
+                         const MeshSegmenter::Config& config) {
+  KdTreeT::Ptr tree(new KdTreeT());
+  tree->setInputCloud(cloud_ptr);
+  pcl::EuclideanClusterExtraction<CloudPoint> estimator;
+  estimator.setClusterTolerance(config.cluster_tolerance);
+  estimator.setMinClusterSize(config.min_cluster_size);
+  estimator.setMaxClusterSize(config.max_cluster_size);
+  estimator.setSearchMethod(tree);
+  estimator.setInputCloud(cloud_ptr);
+  estimator.extract(cluster_indices);
+}
+
+float computeMedian(std::vector<float>& coords) {
+  std::sort(coords.begin(), coords.end());
+  size_t n = coords.size();
+  if (n % 2 == 0) {
+    return (coords[n / 2 - 1] + coords[n / 2]) / 2.0f;
+  } else {
+    return coords[n / 2];
+  }
+}
+
+CloudPoint computeMeshMedian(MeshCloud::Ptr mesh_ptr) {
+  std::vector<float> x_coords, y_coords, z_coords;
+  x_coords.reserve(mesh_ptr->size());
+  y_coords.reserve(mesh_ptr->size());
+  z_coords.reserve(mesh_ptr->size());
+
+  // Extract coordinates
+  for (const auto& point : mesh_ptr->points) {
+    x_coords.push_back(point.x);
+    y_coords.push_back(point.y);
+    z_coords.push_back(point.z);
+  }
+
+  // Compute medians
+  float median_x = computeMedian(x_coords);
+  float median_y = computeMedian(y_coords);
+  float median_z = computeMedian(z_coords);
+  CloudPoint mesh_median;
+  mesh_median.x = median_x;
+  mesh_median.y = median_y;
+  mesh_median.z = median_z;
+  return mesh_median;
+}
+
+bool isPointCloseToCloud(const CloudPoint& point_D,
+                         const MeshCloud::Ptr instance_mesh,
+                         pcl::KdTreeFLANN<CloudPoint> kdtree,
+                         int k,
+                         float threshold) {
+  kdtree.setInputCloud(instance_mesh);
+  // holds the resultant indices of the neighboring points
+  std::vector<int> pointIdxKNNSearch(k);
+  // holds the resultant squared distances to nearby points
+  std::vector<float> pointKNNSqrNorm(k);
+  if (kdtree.nearestKSearch(point_D, k, pointIdxKNNSearch, pointKNNSqrNorm) > 0) {
+    for (std::size_t i = 0; i < pointIdxKNNSearch.size(); ++i) {
+      int idx = pointIdxKNNSearch[i];
+      CloudPoint instance_point;
+      instance_point.x = instance_mesh->points[idx].x;
+      instance_point.y = instance_mesh->points[idx].y;
+      instance_point.z = instance_mesh->points[idx].z;
+      // compute l2 distance squared
+      float dist = l2_norm_sq(point_D, instance_point);
+      if (dist < threshold) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
@@ -267,90 +348,66 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
     }
     // // TODO: (phuoc) Use config file for the parameters
     // Downsample
-    float vox_grid_size = 0.01f;
+    float vox_grid_size = 0.05f;
     MeshCloud::Ptr cloud_downsampled =
         downsampleCloud(instance_mesh_ptr, vox_grid_size);
     // remove outlier
     MeshCloud::Ptr cloud_filtered =
         cloudStatisticalOutlierRemoval(cloud_downsampled, 50, 0.5);
 
-    // TEST: not cluster and push everything after filtering
-    MeshCloud::Ptr instance_cloud(new MeshCloud);
-    for (const auto& point : cloud_filtered->points) {
-      instance_cloud->push_back(point);
-    }
-    int64 class_id = mask_data.class_id;
-    InstanceData instance_data = std::make_pair(mask_data, instance_cloud);
-    if (cls_to_instance.find(class_id) == cls_to_instance.end()) {
-      std::vector<std::pair<MaskData, MeshCloud::Ptr>> mesh_vec;
-      mesh_vec.push_back(instance_data);
-      cls_to_instance.insert(std::make_pair(class_id, mesh_vec));
-    } else {
-      cls_to_instance.at(class_id).push_back(instance_data);
-    }
-    if (class_id == 60) {
-      pcl::io::savePCDFileASCII("/home/ros/debug/CloudFiltered" + std::to_string(std::rand()) + ".png", *cloud_filtered);
-    }
-    //
-    // //! TEST: Find Cluster (Try to fix splattering issue)
-    // KdTreeT::Ptr tree(new KdTreeT());
-    // tree->setInputCloud(cloud_filtered);
-    // pcl::EuclideanClusterExtraction<CloudPoint> estimator;
-    // estimator.setClusterTolerance(config.cluster_tolerance);
-    // estimator.setMinClusterSize(config.min_cluster_size);
-    // estimator.setMaxClusterSize(config.max_cluster_size);
-    // estimator.setSearchMethod(tree);
-    // estimator.setInputCloud(cloud_filtered);
-    // std::vector<pcl::PointIndices> cluster_indices;
-    // estimator.extract(cluster_indices);
-    //
-    // size_t max_cluster_sz = 0;
-    // int largest_cluster_id = -1;
-    // int cluster_sum = 0;
-    // // TODO: (phuoc) fix this
-    // // BUG: Still separates some objects into pieces, consider re-merging strategy
+    CloudPoint mesh_median = computeMeshMedian(cloud_filtered);
+    //! TEST: Find Cluster (Try to fix splattering issue)
+    std::vector<pcl::PointIndices> cluster_indices;
+    euclideanClustering(cloud_filtered, cluster_indices, config);
+
+    // TODO: (phuoc) fix this
+    // BUG: Still separates some objects into pieces, consider re-merging strategy
+    MeshCloud::Ptr valid_cluster(new MeshCloud);
+    pcl::KdTreeFLANN<CloudPoint> kdtree;
+    int k = 10;
+    float threshold = 0.025;
     // for (size_t i = 0; i < cluster_indices.size(); i++) {
-    //   size_t cluster_sz = cluster_indices[i].indices.size();
-    //   cluster_sum = cluster_sum + cluster_sz;
-    //   if (cluster_sz > max_cluster_sz) {
-    //     max_cluster_sz = cluster_sz;
-    //     largest_cluster_id = i;
-    //   }
-    // }
-    //! BUG: Missing some items here, check why
-    // if (largest_cluster_id > -1) {
-    //   MeshCloud::Ptr instance_cloud(new MeshCloud);
-    //   for (const auto& id : cluster_indices[largest_cluster_id].indices) {
-    //     instance_cloud->push_back(cloud_filtered->points[id]);
-    //   }
-    //   int64 class_id = mask_data.class_id;
-    //   InstanceData instance_data = std::make_pair(mask_data, instance_cloud);
-    //   if (cls_to_instance.find(class_id) == cls_to_instance.end()) {
-    //     std::vector<std::pair<MaskData, MeshCloud::Ptr>> mesh_vec;
-    //     mesh_vec.push_back(instance_data);
-    //     cls_to_instance.insert(std::make_pair(class_id, mesh_vec));
-    //   } else {
-    //     cls_to_instance.at(class_id).push_back(instance_data);
-    //   }
-    // }
+    for (const auto& cluster : cluster_indices) {
+      MeshCloud::Ptr cluster_cloud(new MeshCloud);
+      for (const auto& id : cluster.indices) {
+        CloudPoint point;
+        point.x = cloud_filtered->points[id].x;
+        point.y = cloud_filtered->points[id].y;
+        point.z = cloud_filtered->points[id].z;
+        cluster_cloud->push_back(point);
+      }
+      if (isPointCloseToCloud(mesh_median, cluster_cloud, kdtree, k, threshold)) {
+        *valid_cluster += *cluster_cloud;
+      }
+    }
+    //! TEST: Trying with median based clustering
+    if (valid_cluster->size() > 0) {
+      int64 class_id = mask_data.class_id;
+      InstanceData instance_data = std::make_pair(mask_data, valid_cluster);
+      if (cls_to_instance.find(class_id) == cls_to_instance.end()) {
+        std::vector<std::pair<MaskData, MeshCloud::Ptr>> mesh_vec;
+        mesh_vec.push_back(instance_data);
+        cls_to_instance.insert(std::make_pair(class_id, mesh_vec));
+      } else {
+        cls_to_instance.at(class_id).push_back(instance_data);
+      }
+    }
   }
   //! BUG: Debugging by viewing cloud (Somehow instance views only have 1
   // point????)
-  // for (const auto& cls_mesh : cls_to_mesh) {
-  //   const int64 class_id = cls_mesh.first;
-  //   const auto& meshes = cls_mesh.second;
-  //   int count = 0;
-  //   for (const auto& mesh : meshes) {
-  //     std::string filename = "/home/ros/debug/" + std::to_string(class_id) + "_" +
-  //                            std::to_string(count++) + ".pcd";
-  //     pcl::io::savePCDFileASCII(filename, *mesh);
-  //   }
-  // }
+  for (const auto& cls_mesh : cls_to_instance) {
+    const int64 class_id = cls_mesh.first;
+    const auto& masks_meshes = cls_mesh.second;
+    int random_id = std::rand();
+    int count = 0;
+    for (const auto& mask_mesh : masks_meshes) {
+      std::string filename = "/home/ros/debug/" + std::to_string(class_id) + "_" +
+                             std::to_string(random_id) + "_" + std::to_string(count++) +
+                             ".pcd";
+      pcl::io::savePCDFileASCII(filename, *(mask_mesh.second));
+    }
+  }
   return cls_to_instance;
-}
-
-float l2_norm_sq(const CloudPoint& a, const CloudPoint& b) {
-  return std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) + std::pow(a.z - b.z, 2);
 }
 
 //! TODO: (phuoc) Re-Implement function to get the inlier vertices in the mesh with
@@ -374,38 +431,20 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
       //! NOTE: Go over all points in vertex updates, go check if it is close to a point
       //! of instance mesh
       pcl::KdTreeFLANN<CloudPoint> kdtree;
+      int k = 10;
       for (const auto& point_id : indices) {
         if (registered_indices.find(point_id) == registered_indices.end()) {
           const auto& point_D = delta.vertex_updates->at(point_id);
           kdtree.setInputCloud(instance_mesh);
-          int k = 10;
-          // holds the resultant indices of the neighboring points
-          std::vector<int> pointIdxKNNSearch(k);
-          // holds the resultant squared distances to nearby points
-          std::vector<float> pointKNNSqrNorm(k);
-          if (kdtree.nearestKSearch(point_D, k, pointIdxKNNSearch, pointKNNSqrNorm) >
-              0) {
-            for (std::size_t i = 0; i < pointIdxKNNSearch.size(); ++i) {
-              int idx = pointIdxKNNSearch[i];
-              CloudPoint instance_point;
-              instance_point.x = instance_mesh->points[idx].x;
-              instance_point.y = instance_mesh->points[idx].y;
-              instance_point.z = instance_mesh->points[idx].z;
-              // compute l2 distance squared
-              float dist = l2_norm_sq(point_D, instance_point);
-              if (dist < threshold) {
-                //! NOTE: Registering index
-                registered_indices.insert(point_id);
-                instance_cluster.indices.push_back(point_id);
-                const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
-                instance_cluster.centroid += pos;
-              }
-            }
+          if (isPointCloseToCloud(point_D, instance_mesh, kdtree, k, threshold)) {
+            //! NOTE: Registering index
+            registered_indices.insert(point_id);
+            instance_cluster.indices.push_back(point_id);
+            const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
+            instance_cluster.centroid += pos;
           }
         }
       }
-      // LOG(INFO) << "Got instance cluster of size " <<
-      // instance_cluster.indices.size();
       if (instance_cluster.indices.size() >= config.min_cluster_size) {
         instance_cluster.centroid /= instance_cluster.indices.size();
         instance_cluster.mask = instance_mask;
@@ -559,19 +598,34 @@ void MeshSegmenter::updateGraph(uint64_t timestamp_ns,
     for (const auto& cluster : clusters_for_label) {
       bool matches_prev_node = false;
       std::vector<NodeId> nodes_not_in_graph;
+      std::vector<NodeId> match_candidates;
       for (const auto& prev_node_id : active_nodes_.at(label)) {
         const auto& prev_node = graph.getNode(prev_node_id);
         //! NOTE: Compare with multiple prev nodes, and then merge with the best node to
         //! avoid merging 2 objects that are close
         if (nodesMatch(cluster, prev_node)) {
-          updateNodeInGraph(graph, cluster, prev_node, timestamp_ns);
+          // updateNodeInGraph(graph, cluster, prev_node, timestamp_ns);
+          match_candidates.push_back(prev_node_id);
           matches_prev_node = true;
-          break;
+          // break;
         }
       }
-
       if (!matches_prev_node) {
         addNodeToGraph(graph, cluster, label, timestamp_ns);
+      } else {
+        float min_dist = std::numeric_limits<float>::max();
+        NodeId assigned_id = std::numeric_limits<NodeId>::max();
+        for (const auto& node_id : match_candidates) {
+          const auto& prev_node = graph.getNode(node_id);
+          float distance = (prev_node.attributes().position - cluster.centroid).norm();
+          if (distance < min_dist) {
+            min_dist = distance;
+            assigned_id = node_id;
+          }
+        }
+        if (assigned_id != std::numeric_limits<NodeId>::max()) {
+          updateNodeInGraph(graph, cluster, graph.getNode(assigned_id), timestamp_ns);
+        }
       }
 
       mergeActiveNodes(graph, label);
