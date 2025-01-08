@@ -187,6 +187,9 @@ class FrontendModule : public Module {
                                spark_dsg::ObjectNodeAttributes& object_attr,
                                uint16_t image_id);
   void removeNodesWithoutInstanceViews();
+  //! TEST: Check whether objects are in view frustum or not, if not, if they have less
+  //! than MIN_VALID_VIEWS, remove the node
+  void checkObjectsInViewFrustum(const ReconstructionOutput& input);
   /**
    * @brief Calculate the centroids for all instances. Apply each mask on the vertex
    * map of calculated in calculateVertexMap@hydra/input/camera.cpp and get the

@@ -47,6 +47,7 @@
 #include <opencv2/core/hal/interface.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/search/kdtree.h>
+#include <spark_dsg/dynamic_scene_graph_layer.h>
 #define PCL_NO_PRECOMPILE
 #include <pcl/segmentation/extract_clusters.h>
 #undef PCL_NO_PRECOMPILE
@@ -94,7 +95,6 @@ using hydra::timing::ScopedTimer;
 void declare_config(FrontendModule::Config& config) {
   using namespace config;
   name("FrontendModule::Config");
-  field(config.min_object_vertices, "min_object_vertices");
   field(config.min_object_vertices, "min_object_vertices");
   field(config.lcd_use_bow_vectors, "lcd_use_bow_vectors");
 
@@ -452,6 +452,7 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
                             clusters,
                             last_mesh_update_->getTotalArchivedVertices(),
                             *dsg_->graph);
+    checkObjectsInViewFrustum(input);
     addPlaceObjectEdges(input.timestamp_ns);
   }  // end dsg critical section
 
@@ -460,6 +461,31 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
   //! TEST: Try to assign mask with segmenter so turning this off
   // assignMasksToObjectsInViewFrustum(input);
   // removeNodesWithoutInstanceViews();
+}
+
+void FrontendModule::checkObjectsInViewFrustum(const ReconstructionOutput& input) {
+  std::vector<NodeId> nodes_to_remove;
+  size_t MIN_VALID_VIEWS = 5;
+  for (auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
+    NodeId node_id = node.first;
+    ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
+    if (objectIsInViewFrustum(input.sensor_data->getSensor(),
+                              input.sensor_data->getSensorPose().cast<float>(),
+                              input.sensor_data->min_range,
+                              input.sensor_data->max_range,
+                              object_attr)) {
+      object_attr.is_in_view_frustum = true;
+    } else {
+      if (object_attr.instance_views.id_to_instance_masks.size() <= MIN_VALID_VIEWS ||
+          object_attr.mesh_connections.size() < config.min_object_vertices) {
+        nodes_to_remove.push_back(node_id);
+      }
+      object_attr.is_in_view_frustum = false;
+    }
+  }
+  for (const auto& node_id : nodes_to_remove) {
+    dsg_->graph->removeNode(node_id);
+  }
 }
 
 using PgmoCloud = pcl::PointCloud<pcl::PointXYZRGBA>;

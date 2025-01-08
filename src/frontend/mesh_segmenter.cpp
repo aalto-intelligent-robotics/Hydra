@@ -34,6 +34,7 @@
  * -------------------------------------------------------------------------- */
 #include "hydra/frontend/mesh_segmenter.h"
 
+#include <Eigen/src/Core/Matrix.h>
 #include <glog/logging.h>
 #include <kimera_pgmo/mesh_delta.h>
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -152,8 +153,21 @@ inline bool nodesMatch(const SceneGraphNode& lhs_node, const SceneGraphNode& rhs
 }
 
 inline bool nodesMatch(const Cluster& cluster, const SceneGraphNode& node) {
-  return node.attributes<SemanticNodeAttributes>().bounding_box.contains(
-      cluster.centroid);
+  auto& node_attr = node.attributes<ObjectNodeAttributes>();
+  if (node_attr.bounding_box.contains(cluster.centroid)) {
+    return true;
+  }
+  //! TEST: To fix small bbox inside larger box
+  float threshold = 0.5;
+  float inlier_count = 0;
+  for (const auto& point : cluster.mesh) {
+    Eigen::Vector3d eigen_point(point.x, point.y, point.z);
+    if (node_attr.bounding_box.contains(eigen_point)) {
+      inlier_count++;
+    }
+  }
+  float inlier_ratio = inlier_count / static_cast<float>(cluster.mesh.size());
+  return inlier_ratio > threshold;
 }
 
 std::vector<size_t> getActiveIndices(const kimera_pgmo::MeshDelta& delta,
@@ -442,6 +456,7 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
             instance_cluster.indices.push_back(point_id);
             const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
             instance_cluster.centroid += pos;
+            instance_cluster.mesh.push_back(point_D);
           }
         }
       }
@@ -628,7 +643,9 @@ void MeshSegmenter::updateGraph(uint64_t timestamp_ns,
         }
       }
 
-      mergeActiveNodes(graph, label);
+      //! TEST: Remove merge active nodes since it groups up small objects that are
+      //! close (chairs)
+      // mergeActiveNodes(graph, label);
     }
   }
 }
