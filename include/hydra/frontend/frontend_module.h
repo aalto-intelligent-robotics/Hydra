@@ -83,6 +83,7 @@ class FrontendModule : public Module {
   struct Config {
     size_t min_object_vertices = 20;
     bool lcd_use_bow_vectors = true;
+    size_t min_valid_views = 10;
     struct DeformationConfig {
       double mesh_resolution = 0.1;
       double d_graph_resolution = 1.5;

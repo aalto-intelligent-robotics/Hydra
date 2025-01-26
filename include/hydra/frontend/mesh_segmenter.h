@@ -78,6 +78,8 @@ class MeshSegmenter {
     std::set<uint32_t> labels;
     std::string timer_namespace = "frontend/objects";
     std::vector<Sink::Factory> sinks;
+    float min_mesh_z = 0.0;
+    float processing_grid_size = 0.005f;
   } const config;
 
   explicit MeshSegmenter(const Config& config);

@@ -37,6 +37,7 @@
 #include <Eigen/src/Core/Matrix.h>
 #include <glog/logging.h>
 #include <kimera_pgmo/mesh_delta.h>
+#include <pcl/filters/conditional_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
@@ -106,6 +107,8 @@ void declare_config(MeshSegmenter::Config& config) {
   config.labels = GlobalInfo::instance().getLabelSpaceConfig().object_labels;
   field(config.timer_namespace, "timer_namespace");
   field(config.sinks, "sinks");
+  field(config.min_mesh_z, "min_mesh_z");
+  field(config.processing_grid_size, "processing_grid_size");
 }
 
 template <typename LList, typename RList>
@@ -239,6 +242,24 @@ float l2_norm_sq(const CloudPoint& a, const CloudPoint& b) {
   return std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) + std::pow(a.z - b.z, 2);
 }
 
+MeshCloud::Ptr removeFloor(MeshCloud::Ptr cloud, float z) {
+  // Downsample
+  MeshCloud::Ptr cloud_filtered(new MeshCloud);
+  // build the condition
+  pcl::ConditionAnd<CloudPoint>::Ptr condition(new pcl::ConditionAnd<CloudPoint>());
+  condition->addComparison(pcl::FieldComparison<CloudPoint>::ConstPtr(
+      new pcl::FieldComparison<CloudPoint>("z", pcl::ComparisonOps::GT, z)));
+  // build the filter
+  pcl::ConditionalRemoval<CloudPoint> condrem;
+  condrem.setCondition(condition);
+  condrem.setInputCloud(cloud);
+  condrem.setKeepOrganized(true);
+
+  // apply filter
+  condrem.filter(*cloud_filtered);
+  return cloud_filtered;
+}
+
 MeshCloud::Ptr downsampleCloud(MeshCloud::Ptr cloud, float vox_size) {
   // Downsample
   MeshCloud::Ptr cloud_downsampled(new MeshCloud);
@@ -315,6 +336,9 @@ bool isPointCloseToCloud(const CloudPoint& point_D,
                          pcl::KdTreeFLANN<CloudPoint> kdtree,
                          int k,
                          float threshold) {
+  if (instance_mesh->points.empty()) {
+    return false;
+  }
   kdtree.setInputCloud(instance_mesh);
   // holds the resultant indices of the neighboring points
   std::vector<int> pointIdxKNNSearch(k);
@@ -322,15 +346,16 @@ bool isPointCloseToCloud(const CloudPoint& point_D,
   std::vector<float> pointKNNSqrNorm(k);
   if (kdtree.nearestKSearch(point_D, k, pointIdxKNNSearch, pointKNNSqrNorm) > 0) {
     for (std::size_t i = 0; i < pointIdxKNNSearch.size(); ++i) {
-      int idx = pointIdxKNNSearch[i];
-      CloudPoint instance_point;
-      instance_point.x = instance_mesh->points[idx].x;
-      instance_point.y = instance_mesh->points[idx].y;
-      instance_point.z = instance_mesh->points[idx].z;
-      // compute l2 distance squared
-      float dist = l2_norm_sq(point_D, instance_point);
-      if (dist < threshold) {
-        return true;
+      std::size_t idx = pointIdxKNNSearch[i];
+      if (idx >= 0 && idx < instance_mesh->points.size()) {
+        CloudPoint instance_point;
+        instance_point.x = instance_mesh->points[idx].x;
+        instance_point.y = instance_mesh->points[idx].y;
+        instance_point.z = instance_mesh->points[idx].z;
+        float dist = l2_norm_sq(point_D, instance_point);
+        if (dist < threshold) {
+          return true;
+        }
       }
     }
   }
@@ -362,26 +387,32 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
     }
     // // TODO: (phuoc) Use config file for the parameters
     // Downsample
-    float vox_grid_size = 0.05f;
+    // float vox_grid_size = 0.05f;
     MeshCloud::Ptr cloud_downsampled =
-        downsampleCloud(instance_mesh_ptr, vox_grid_size);
+        downsampleCloud(instance_mesh_ptr, config.processing_grid_size);
+
+    // TODO: Remove the floor here
+    MeshCloud::Ptr cloud_floor_rm = removeFloor(cloud_downsampled, config.min_mesh_z);
+
     // remove outlier
     MeshCloud::Ptr cloud_filtered =
-        cloudStatisticalOutlierRemoval(cloud_downsampled, 50, 0.5);
+        cloudStatisticalOutlierRemoval(cloud_floor_rm, 50, 0.5);
 
     CloudPoint mesh_median = computeMeshMedian(cloud_filtered);
     //! TEST: Find Cluster (Try to fix splattering issue)
     std::vector<pcl::PointIndices> cluster_indices;
-    euclideanClustering(cloud_filtered, cluster_indices, config);
+    if (!cloud_filtered->empty()) {
+      euclideanClustering(cloud_filtered, cluster_indices, config);
+    }
 
     // TODO: (phuoc) fix this
     // BUG: Still separates some objects into pieces, consider re-merging strategy
     MeshCloud::Ptr valid_cluster(new MeshCloud);
-    pcl::KdTreeFLANN<CloudPoint> kdtree;
     int k = 10;
     float threshold = 0.025;
     // for (size_t i = 0; i < cluster_indices.size(); i++) {
     for (const auto& cluster : cluster_indices) {
+      pcl::KdTreeFLANN<CloudPoint> kdtree;
       MeshCloud::Ptr cluster_cloud(new MeshCloud);
       for (const auto& id : cluster.indices) {
         CloudPoint point;
@@ -449,14 +480,16 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
       for (const auto& point_id : indices) {
         if (registered_indices.find(point_id) == registered_indices.end()) {
           const auto& point_D = delta.vertex_updates->at(point_id);
-          kdtree.setInputCloud(instance_mesh);
-          if (isPointCloseToCloud(point_D, instance_mesh, kdtree, k, threshold)) {
-            //! NOTE: Registering index
-            registered_indices.insert(point_id);
-            instance_cluster.indices.push_back(point_id);
-            const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
-            instance_cluster.centroid += pos;
-            instance_cluster.mesh.push_back(point_D);
+          if (!instance_mesh->points.empty()) {
+            kdtree.setInputCloud(instance_mesh);
+            if (isPointCloseToCloud(point_D, instance_mesh, kdtree, k, threshold)) {
+              //! NOTE: Registering index
+              registered_indices.insert(point_id);
+              instance_cluster.indices.push_back(point_id);
+              const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
+              instance_cluster.centroid += pos;
+              instance_cluster.mesh.push_back(point_D);
+            }
           }
         }
       }
@@ -478,7 +511,7 @@ Clusters findClusters(const MeshSegmenter::Config& config,
   KdTreeT::Ptr tree(new KdTreeT());
   tree->setInputCloud(delta.vertex_updates, pcl_indices);
 
-  pcl::EuclideanClusterExtraction<pcl::PointXYZRGBA> estimator;
+  pcl::EuclideanClusterExtraction<CloudPoint> estimator;
   estimator.setClusterTolerance(config.cluster_tolerance);
   estimator.setMinClusterSize(config.min_cluster_size);
   estimator.setMaxClusterSize(config.max_cluster_size);

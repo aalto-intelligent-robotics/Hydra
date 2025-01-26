@@ -97,6 +97,7 @@ void declare_config(FrontendModule::Config& config) {
   name("FrontendModule::Config");
   field(config.min_object_vertices, "min_object_vertices");
   field(config.lcd_use_bow_vectors, "lcd_use_bow_vectors");
+  field(config.min_valid_views, "min_valid_views");
 
   {
     NameSpace ns("pgmo");
@@ -465,7 +466,6 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
 
 void FrontendModule::checkObjectsInViewFrustum(const ReconstructionOutput& input) {
   std::vector<NodeId> nodes_to_remove;
-  size_t MIN_VALID_VIEWS = 5;
   for (auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
     NodeId node_id = node.first;
     ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
@@ -476,8 +476,12 @@ void FrontendModule::checkObjectsInViewFrustum(const ReconstructionOutput& input
                               object_attr)) {
       object_attr.is_in_view_frustum = true;
     } else {
-      if (object_attr.instance_views.id_to_instance_masks.size() <= MIN_VALID_VIEWS ||
+      if (object_attr.instance_views.id_to_instance_masks.size() <
+              config.min_valid_views ||
           object_attr.mesh_connections.size() < config.min_object_vertices) {
+        LOG(INFO) << "Removing instance " << object_attr.name << " " << node_id
+                  << "with " << object_attr.instance_views.id_to_instance_masks.size()
+                  << " instances which is smaller than " << config.min_valid_views;
         nodes_to_remove.push_back(node_id);
       }
       object_attr.is_in_view_frustum = false;
