@@ -178,40 +178,18 @@ class FrontendModule : public Module {
                         const NodeId& node_id,
                         spark_dsg::ObjectNodeAttributes& object_attr,
                         uint16_t image_id);
-  using CloudPoint = pcl::PointXYZ;
-  using MeshCloud = pcl::PointCloud<CloudPoint>;
-  using InstanceView = std::pair<MaskData::Ptr, MeshCloud::Ptr>;
-  using InstanceViewVec = std::vector<InstanceView>;
-  using ClassToInstanceViews = std::unordered_map<int64, InstanceViewVec>;
-  void assignMaskToNodeChamfer(const ClassToInstanceViews& instance_views,
-                               const NodeId& node_id,
-                               spark_dsg::ObjectNodeAttributes& object_attr,
-                               uint16_t image_id);
-  void removeNodesWithoutInstanceViews();
-  //! TEST: Check whether objects are in view frustum or not, if not, if they have less
-  //! than MIN_VALID_VIEWS, remove the node
+  /**
+   * @brief Remove nodes whose instance views have less than config.min_valid_views
+   * images
+   */
+  void removeInvalidNodes();
+  /**
+   * @brief Go through all objects within the viewing frustum, if they have less than
+   * config.min_valid_views, remove them
+   *
+   * @param input the reconstruction input containing sensor data
+   */
   void checkObjectsInViewFrustum(const ReconstructionOutput& input);
-  /**
-   * @brief Calculate the centroids for all instances. Apply each mask on the vertex
-   * map of calculated in calculateVertexMap@hydra/input/camera.cpp and get the
-   * instance centroids
-   *
-   * @param input output of ReconstructionModule, containing sensor data, vertex
-   * map, etc.
-   * @return an unordered map that maps the class id to the masks and
-   * centroids to support mapping instances with the same categories
-   */
-  ClassToMaskDataAndCentroid calculateInstanceCentroids(
-      const ReconstructionOutput& input);
-  ClassToInstanceViews calculateInstanceViews(const ReconstructionOutput& input);
-  /**
-   * @brief Get all object nodes within the camera's viewing frustum, then assign
-   * instance masks to them
-   *
-   * @param input output of ReconstructionModule, containing sensor data, vertex map,
-   * etc.
-   */
-  void assignMasksToObjectsInViewFrustum(const ReconstructionOutput& input);
 
  protected:
   using InputPtrCallback = std::function<void(const ReconstructionOutput::Ptr&)>;

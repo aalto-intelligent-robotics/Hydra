@@ -141,17 +141,8 @@ std::string printLabels(const std::set<T>& labels) {
 }
 
 inline bool nodesMatch(const SceneGraphNode& lhs_node, const SceneGraphNode& rhs_node) {
-  // TODO: (phuoc) Fix this
-  //! BUG: need to fix this merging of nodes:
-  // - Curently too many instances, need to merge only when iou is high, or one box is
-  // inside another (essentially doing NMS)
   auto& lhs_node_attr = lhs_node.attributes<ObjectNodeAttributes>();
   auto& rhs_node_attr = rhs_node.attributes<ObjectNodeAttributes>();
-  // if (lhs_node_attr.bounding_box.type == spark_dsg::BoundingBox::Type::AABB) {
-  //   float bbox_iou_thresh = 0.5;
-  //   return lhs_node_attr.bounding_box.computeIoU(rhs_node_attr.bounding_box) >
-  //          bbox_iou_thresh;
-  // }
   return lhs_node_attr.bounding_box.contains(rhs_node_attr.position);
 }
 
@@ -160,7 +151,6 @@ inline bool nodesMatch(const Cluster& cluster, const SceneGraphNode& node) {
   if (node_attr.bounding_box.contains(cluster.centroid)) {
     return true;
   }
-  //! TEST: To fix small bbox inside larger box
   float threshold = 0.5;
   float inlier_count = 0;
   for (const auto& point : cluster.mesh) {
@@ -234,9 +224,6 @@ LabelIndices getLabelIndices(const MeshSegmenter::Config& config,
   VLOG(2) << "[Mesh Segmenter] Seen labels: " << printLabels(seen_labels);
   return label_indices;
 }
-
-// TEST: get instances cluster, then use extractIndices to find inliers within mesh
-// updates
 
 float l2_norm_sq(const CloudPoint& a, const CloudPoint& b) {
   return std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) + std::pow(a.z - b.z, 2);
@@ -347,7 +334,7 @@ bool isPointCloseToCloud(const CloudPoint& point_D,
   if (kdtree.nearestKSearch(point_D, k, pointIdxKNNSearch, pointKNNSqrNorm) > 0) {
     for (std::size_t i = 0; i < pointIdxKNNSearch.size(); ++i) {
       std::size_t idx = pointIdxKNNSearch[i];
-      if (idx >= 0 && idx < instance_mesh->points.size()) {
+      if (idx < instance_mesh->points.size()) {
         CloudPoint instance_point;
         instance_point.x = instance_mesh->points[idx].x;
         instance_point.y = instance_mesh->points[idx].y;
@@ -364,7 +351,6 @@ bool isPointCloseToCloud(const CloudPoint& point_D,
 
 ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
                                        MeshSegmenter::Config config) {
-  //! TODO: (phuoc) Assign the mask here
   const cv::Mat& vertex_map = input.sensor_data->vertex_map;
   const int& rows = vertex_map.size().height;
   const int& cols = vertex_map.size().width;
@@ -385,13 +371,11 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
         }
       }
     }
-    // // TODO: (phuoc) Use config file for the parameters
     // Downsample
-    // float vox_grid_size = 0.05f;
     MeshCloud::Ptr cloud_downsampled =
         downsampleCloud(instance_mesh_ptr, config.processing_grid_size);
 
-    // TODO: Remove the floor here
+    // Remove the floor here
     MeshCloud::Ptr cloud_floor_rm = removeFloor(cloud_downsampled, config.min_mesh_z);
 
     // remove outlier
@@ -399,18 +383,15 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
         cloudStatisticalOutlierRemoval(cloud_floor_rm, 50, 0.5);
 
     CloudPoint mesh_median = computeMeshMedian(cloud_filtered);
-    //! TEST: Find Cluster (Try to fix splattering issue)
+    //! Find Cluster (Try to fix splattering issue)
     std::vector<pcl::PointIndices> cluster_indices;
     if (!cloud_filtered->empty()) {
       euclideanClustering(cloud_filtered, cluster_indices, config);
     }
 
-    // TODO: (phuoc) fix this
-    // BUG: Still separates some objects into pieces, consider re-merging strategy
     MeshCloud::Ptr valid_cluster(new MeshCloud);
     int k = 10;
     float threshold = 0.025;
-    // for (size_t i = 0; i < cluster_indices.size(); i++) {
     for (const auto& cluster : cluster_indices) {
       pcl::KdTreeFLANN<CloudPoint> kdtree;
       MeshCloud::Ptr cluster_cloud(new MeshCloud);
@@ -425,7 +406,6 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
         *valid_cluster += *cluster_cloud;
       }
     }
-    //! TEST: Trying with median based clustering
     if (valid_cluster->size() > 0) {
       int64 class_id = mask_data.class_id;
       InstanceData instance_data = std::make_pair(mask_data, valid_cluster);
@@ -438,26 +418,9 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
       }
     }
   }
-  //! BUG: Debugging by viewing cloud (Somehow instance views only have 1
-  // point????)
-  for (const auto& cls_mesh : cls_to_instance) {
-    const int64 class_id = cls_mesh.first;
-    const auto& masks_meshes = cls_mesh.second;
-    int random_id = std::rand();
-    int count = 0;
-    for (const auto& mask_mesh : masks_meshes) {
-      std::string filename = "/home/ros/debug/" + std::to_string(class_id) + "_" +
-                             std::to_string(random_id) + "_" + std::to_string(count++) +
-                             ".pcd";
-      pcl::io::savePCDFileASCII(filename, *(mask_mesh.second));
-    }
-  }
   return cls_to_instance;
 }
 
-//! TODO: (phuoc) Re-Implement function to get the inlier vertices in the mesh with
-//! comparison to the instance clusters (using k-nearest neighbor search instead of all
-//! pairs for speed if possible)
 Clusters findInstanceClusters(const MeshSegmenter::Config& config,
                               const kimera_pgmo::MeshDelta& delta,
                               const std::vector<size_t>& indices,
@@ -503,46 +466,6 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
   return clusters;
 }
 
-Clusters findClusters(const MeshSegmenter::Config& config,
-                      const kimera_pgmo::MeshDelta& delta,
-                      const std::vector<size_t>& indices) {
-  pcl::IndicesPtr pcl_indices(new pcl::Indices(indices.begin(), indices.end()));
-
-  KdTreeT::Ptr tree(new KdTreeT());
-  tree->setInputCloud(delta.vertex_updates, pcl_indices);
-
-  pcl::EuclideanClusterExtraction<CloudPoint> estimator;
-  estimator.setClusterTolerance(config.cluster_tolerance);
-  estimator.setMinClusterSize(config.min_cluster_size);
-  estimator.setMaxClusterSize(config.max_cluster_size);
-  estimator.setSearchMethod(tree);
-  estimator.setInputCloud(delta.vertex_updates);
-  estimator.setIndices(pcl_indices);
-
-  std::vector<pcl::PointIndices> cluster_indices;
-  estimator.extract(cluster_indices);
-
-  Clusters clusters;
-  clusters.resize(cluster_indices.size());
-  for (size_t k = 0; k < clusters.size(); ++k) {
-    auto& cluster = clusters.at(k);
-    const auto& curr_indices = cluster_indices.at(k).indices;
-    for (const auto local_idx : curr_indices) {
-      cluster.indices.push_back(delta.getGlobalIndex(local_idx));
-
-      const auto& p = delta.vertex_updates->at(local_idx);
-      const Eigen::Vector3d pos(p.x, p.y, p.z);
-      cluster.centroid += pos;
-    }
-
-    if (curr_indices.size()) {
-      cluster.centroid /= curr_indices.size();
-    }
-  }
-
-  return clusters;
-}
-
 MeshSegmenter::MeshSegmenter(const Config& config)
     : config(config::checkValid(config)),
       next_node_id_(config.prefix, 0),
@@ -585,7 +508,6 @@ LabelClusters MeshSegmenter::detect(const ReconstructionOutput& input,
       continue;
     }
 
-    // const auto clusters = findClusters(config, delta, label_indices.at(label));
     const auto class_to_mesh = computeInstancesClouds(input, config);
     const auto clusters = findInstanceClusters(config,
                                                delta,
@@ -652,10 +574,8 @@ void MeshSegmenter::updateGraph(uint64_t timestamp_ns,
         //! NOTE: Compare with multiple prev nodes, and then merge with the best node to
         //! avoid merging 2 objects that are close
         if (nodesMatch(cluster, prev_node)) {
-          // updateNodeInGraph(graph, cluster, prev_node, timestamp_ns);
           match_candidates.push_back(prev_node_id);
           matches_prev_node = true;
-          // break;
         }
       }
       if (!matches_prev_node) {
@@ -675,10 +595,6 @@ void MeshSegmenter::updateGraph(uint64_t timestamp_ns,
           updateNodeInGraph(graph, cluster, graph.getNode(assigned_id), timestamp_ns);
         }
       }
-
-      //! TEST: Remove merge active nodes since it groups up small objects that are
-      //! close (chairs)
-      // mergeActiveNodes(graph, label);
     }
   }
 }
@@ -785,7 +701,7 @@ void MeshSegmenter::addNodeToGraph(DynamicSceneGraph& graph,
   mask_to_assign = std::make_shared<cv::Mat>(cluster.mask.mask);
   attrs->instance_views.add_view(graph.mapViewCount(), *mask_to_assign);
 
-  auto label_map = GlobalInfo::instance().getSemanticColorMap();
+  std::shared_ptr<SemanticColorMap> label_map = GlobalInfo::instance().getSemanticColorMap();
   if (!label_map || !label_map->isValid()) {
     label_map = GlobalInfo::instance().setRandomColormap();
     CHECK(label_map != nullptr);
