@@ -81,9 +81,9 @@ namespace hydra {
 
 using Clusters = MeshSegmenter::Clusters;
 using LabelClusters = MeshSegmenter::LabelClusters;
-using KdTreeT = pcl::search::KdTree<pcl::PointXYZRGBA>;
 using timing::ScopedTimer;
 using CloudPoint = pcl::PointXYZRGBA;
+using KdTreeT = pcl::search::KdTree<CloudPoint>;
 using MeshCloud = pcl::PointCloud<CloudPoint>;
 using InstanceData = std::pair<MaskData, MeshCloud::Ptr>;
 using ClassToInstance = std::unordered_map<int64, std::vector<InstanceData>>;

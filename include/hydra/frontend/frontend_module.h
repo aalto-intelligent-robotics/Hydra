@@ -74,12 +74,6 @@ class FrontendModule : public Module {
   using InputCallback = std::function<void(const ReconstructionOutput&)>;
   using Sink = OutputSink<uint64_t, const DynamicSceneGraph&, const BackendInput&>;
 
-  using Centroid = Eigen::Vector3f;
-  using CentroidPtr = std::shared_ptr<Centroid>;
-  using MaskDataAndCentroid = std::pair<MaskData::Ptr, CentroidPtr>;
-  using MaskDataAndCentroidVec = std::vector<MaskDataAndCentroid>;
-  using ClassToMaskDataAndCentroid = std::unordered_map<int64, MaskDataAndCentroidVec>;
-
   struct Config {
     size_t min_object_vertices = 20;
     bool lcd_use_bow_vectors = true;
@@ -161,23 +155,6 @@ class FrontendModule : public Module {
   void processNextInput(const ReconstructionOutput& msg);
 
   void updatePlaceMeshMapping(const ReconstructionOutput& input);
-
-  /**
-   * @brief Assign an instance mask to an object node by going through all the masks
-   * with the same category. Assign the mask with the closest centroid (calculated from
-   * calculateInstanceCentroids) to the node's bounding box centroid.
-   *
-   * @param masks_and_centroids an unordered map that maps the class id to the masks and
-   * centroids to support mapping instances with the same categories
-   * @param node_id the node ID
-   * @param object_attr attributes of the scene graph object node
-   * @param image_id The map view ID (MapView defined in spark_dsg)
-   * @return True if a mask was successfully assigned to the node
-   */
-  bool assignMaskToNode(const ClassToMaskDataAndCentroid& masks_and_centroids,
-                        const NodeId& node_id,
-                        spark_dsg::ObjectNodeAttributes& object_attr,
-                        uint16_t image_id);
   /**
    * @brief Remove nodes whose instance views have less than config.min_valid_views
    * images
