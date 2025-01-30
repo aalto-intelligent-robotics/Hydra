@@ -435,7 +435,8 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
     return;
   }
 
-  dsg_->graph->addMapView(input.sensor_data->color_image);
+  dsg_->graph->addMapView(input.sensor_data->instance_masks[0].map_view_id,
+                          input.sensor_data->color_image);
   const auto clusters =
       segmenter_->detect(input, input.timestamp_ns, *last_mesh_update_, std::nullopt);
 

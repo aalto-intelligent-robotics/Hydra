@@ -21,7 +21,8 @@ namespace hydra {
 struct MaskData {
   using Ptr = std::shared_ptr<MaskData>;
   
-  int64 class_id;
+  uint64 map_view_id;
+  uint64 class_id;
   cv::Mat mask;
 
   virtual ~MaskData() = default;

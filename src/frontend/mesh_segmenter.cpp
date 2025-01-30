@@ -631,7 +631,7 @@ void MeshSegmenter::mergeActiveNodes(DynamicSceneGraph& graph, uint32_t label) {
       auto& other_attrs = other.attributes<ObjectNodeAttributes>();
       // TODO: (phuoc) merge masks list
       mergeList(attrs.mesh_connections, other_attrs.mesh_connections);
-      attrs.instance_views.merge_views(other_attrs.instance_views);
+      attrs.instance_views.mergeViews(other_attrs.instance_views);
       graph.removeNode(other_id);
       merged_nodes.insert(other_id);
     }
@@ -664,7 +664,7 @@ void MeshSegmenter::updateNodeInGraph(DynamicSceneGraph& graph,
 
   std::shared_ptr<cv::Mat> mask_to_assign;
   mask_to_assign = std::make_shared<cv::Mat>(cluster.mask.mask);
-  attrs.instance_views.add_view(graph.mapViewCount(), *mask_to_assign);
+  attrs.instance_views.addView(graph.getLatestId(), *mask_to_assign);
 
   mergeList(attrs.mesh_connections, cluster.indices);
   updateObjectGeometry(*graph.mesh(), attrs);
@@ -699,7 +699,7 @@ void MeshSegmenter::addNodeToGraph(DynamicSceneGraph& graph,
   // NOTE: add mask here
   std::shared_ptr<cv::Mat> mask_to_assign;
   mask_to_assign = std::make_shared<cv::Mat>(cluster.mask.mask);
-  attrs->instance_views.add_view(graph.mapViewCount(), *mask_to_assign);
+  attrs->instance_views.addView(graph.getLatestId(), *mask_to_assign);
 
   std::shared_ptr<SemanticColorMap> label_map = GlobalInfo::instance().getSemanticColorMap();
   if (!label_map || !label_map->isValid()) {
