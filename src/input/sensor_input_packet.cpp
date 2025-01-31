@@ -62,6 +62,7 @@ bool ImageInputPacket::fillInputData(InputData& msg) const {
   }
   msg.depth_image = depth;
   msg.label_image = labels;
+  msg.map_view_id = map_view_id;
   msg.instance_masks = instance_masks;
   return true;
 }

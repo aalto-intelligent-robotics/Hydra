@@ -22,6 +22,7 @@ struct MaskData {
   using Ptr = std::shared_ptr<MaskData>;
   
   uint64 map_view_id;
+  uint64 mask_id;
   uint64 class_id;
   cv::Mat mask;
 
@@ -59,6 +60,7 @@ struct InputData {
   cv::Mat label_image;
 
   // Instance masks for each instance in the label image
+  uint64 map_view_id;
   std::vector<MaskData> instance_masks;
 
   // 3D points of the range image in sensor or world frame.
