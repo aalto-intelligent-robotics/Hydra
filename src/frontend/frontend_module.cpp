@@ -463,11 +463,11 @@ void FrontendModule::checkObjectsInViewFrustum(const ReconstructionOutput& input
                               object_attr)) {
       object_attr.is_in_view_frustum = true;
     } else {
-      if (object_attr.instance_views.id_to_instance_masks.size() <
+      if (object_attr.instance_views.id_to_instance_masks_.size() <
               config.min_valid_views ||
           object_attr.mesh_connections.size() < config.min_object_vertices) {
         LOG(INFO) << "Removing instance " << object_attr.name << " " << node_id
-                  << "with " << object_attr.instance_views.id_to_instance_masks.size()
+                  << "with " << object_attr.instance_views.id_to_instance_masks_.size()
                   << " instances which is smaller than " << config.min_valid_views;
         nodes_to_remove.push_back(node_id);
       }
@@ -484,11 +484,11 @@ void FrontendModule::removeInvalidNodes() {
   for (const auto& node : dsg_->graph->getLayer(DsgLayers::OBJECTS).nodes()) {
     NodeId node_id = node.first;
     ObjectNodeAttributes object_attr = node.second->attributes<ObjectNodeAttributes>();
-    if (object_attr.instance_views.id_to_instance_masks.size() <
+    if (object_attr.instance_views.id_to_instance_masks_.size() <
             config.min_valid_views ||
         object_attr.mesh_connections.size() < config.min_object_vertices) {
       LOG(INFO) << "Removing instance " << object_attr.name << " " << node_id << "with "
-                << object_attr.instance_views.id_to_instance_masks.size()
+                << object_attr.instance_views.id_to_instance_masks_.size()
                 << " instances which is smaller than " << config.min_valid_views;
       nodes_to_remove.push_back(node_id);
     }
