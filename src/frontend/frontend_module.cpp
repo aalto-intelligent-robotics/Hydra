@@ -48,6 +48,8 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/search/kdtree.h>
 #include <spark_dsg/dynamic_scene_graph_layer.h>
+#include <chrono>
+#include <ratio>
 #define PCL_NO_PRECOMPILE
 #include <pcl/segmentation/extract_clusters.h>
 #undef PCL_NO_PRECOMPILE
@@ -164,6 +166,8 @@ FrontendModule::FrontendModule(const Config& config,
     frontend_graph_logger_.setLayerName(DsgLayers::PLACES, "places");
     frontend_graph_logger_.setLayerName(DsgLayers::MESH_PLACES, "places 2d");
   }
+
+  t_start_ = std::chrono::high_resolution_clock::now();
 }
 
 FrontendModule::~FrontendModule() {
@@ -220,9 +224,17 @@ void FrontendModule::stopImpl() {
 // }
 
 void FrontendModule::save(const LogSetup& log_setup) {
+  const auto output_path = log_setup.getLogDir("frontend");
+
+  t_end_ = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> elapsed_double = t_end_ - t_start_;
+  std::ofstream outfile;
+  outfile.open(output_path + "/time.txt");
+  outfile << elapsed_double.count() << " ms\n";
+  outfile.close();
+
   removeInvalidNodes();
   std::lock_guard<std::mutex> lock(mutex_);
-  const auto output_path = log_setup.getLogDir("frontend");
   dsg_->graph->save(output_path + "/dsg.json", false);
   dsg_->graph->save(output_path + "/dsg_with_mesh.json");
 
@@ -446,7 +458,7 @@ void FrontendModule::updateObjects(const ReconstructionOutput& input) {
                             clusters,
                             last_mesh_update_->getTotalArchivedVertices(),
                             *dsg_->graph);
-    checkObjectsInViewFrustum(input);
+    // checkObjectsInViewFrustum(input);
     addPlaceObjectEdges(input.timestamp_ns);
   }  // end dsg critical section
 }

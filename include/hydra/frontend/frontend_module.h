@@ -36,6 +36,7 @@
 #include <config_utilities/factory.h>
 #include <kimera_pgmo/hashing.h>
 #include <spark_dsg/scene_graph_logger.h>
+#include <chrono>
 
 #include <memory>
 #include <mutex>
@@ -212,6 +213,8 @@ class FrontendModule : public Module {
   std::vector<InputCallback> input_callbacks_;
   std::vector<InputPtrCallback> input_dispatches_;
   std::vector<InputCallback> post_mesh_callbacks_;
+  std::chrono::time_point<std::chrono::system_clock> t_start_;
+  std::chrono::time_point<std::chrono::system_clock> t_end_;
   Sink::List sinks_;
 
   // TODO(lschmid): This mutex currently simply locks all data for manipulation.

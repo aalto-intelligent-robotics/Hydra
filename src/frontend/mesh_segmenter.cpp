@@ -49,6 +49,7 @@
 #include <spark_dsg/scene_graph_types.h>
 
 #include <boost/iostreams/categories.hpp>
+#include <boost/math/policies/policy.hpp>
 #include <boost/mpl/size.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -109,6 +110,10 @@ void declare_config(MeshSegmenter::Config& config) {
   field(config.sinks, "sinks");
   field(config.min_mesh_z, "min_mesh_z");
   field(config.processing_grid_size, "processing_grid_size");
+  field(config.skip_clustering, "skip_clustering");
+  field(config.use_kdtree_distance_check, "use_kdtree_distance_check");
+  field(config.nodes_match_iou_threshold, "nodes_match_iou_threshold");
+  field(config.merge_active_nodes, "merge_active_nodes");
 }
 
 template <typename LList, typename RList>
@@ -140,18 +145,29 @@ std::string printLabels(const std::set<T>& labels) {
   return ss.str();
 }
 
-inline bool nodesMatch(const SceneGraphNode& lhs_node, const SceneGraphNode& rhs_node) {
+inline bool nodesMatch(const SceneGraphNode& lhs_node,
+                       const SceneGraphNode& rhs_node,
+                       const MeshSegmenter::Config& config) {
   auto& lhs_node_attr = lhs_node.attributes<ObjectNodeAttributes>();
   auto& rhs_node_attr = rhs_node.attributes<ObjectNodeAttributes>();
-  return lhs_node_attr.bounding_box.contains(rhs_node_attr.position);
+  if (lhs_node_attr.bounding_box.contains(rhs_node_attr.position)) {
+    return true;
+  }
+  if (lhs_node_attr.bounding_box.computeIoU(rhs_node_attr.bounding_box) >
+      config.nodes_match_iou_threshold) {
+    return true;
+  }
+  return false;
 }
 
-inline bool nodesMatch(const Cluster& cluster, const SceneGraphNode& node) {
+inline bool nodesMatch(const Cluster& cluster,
+                       const SceneGraphNode& node,
+                       const MeshSegmenter::Config& config) {
   auto& node_attr = node.attributes<ObjectNodeAttributes>();
   if (node_attr.bounding_box.contains(cluster.centroid)) {
     return true;
   }
-  float threshold = 0.5;
+  float threshold = config.nodes_match_iou_threshold;
   float inlier_count = 0;
   for (const auto& point : cluster.mesh) {
     Eigen::Vector3d eigen_point(point.x, point.y, point.z);
@@ -273,15 +289,17 @@ MeshCloud::Ptr cloudStatisticalOutlierRemoval(MeshCloud::Ptr cloud,
 void euclideanClustering(MeshCloud::Ptr cloud_ptr,
                          std::vector<pcl::PointIndices>& cluster_indices,
                          const MeshSegmenter::Config& config) {
-  KdTreeT::Ptr tree(new KdTreeT());
-  tree->setInputCloud(cloud_ptr);
-  pcl::EuclideanClusterExtraction<CloudPoint> estimator;
-  estimator.setClusterTolerance(config.cluster_tolerance);
-  estimator.setMinClusterSize(config.min_cluster_size);
-  estimator.setMaxClusterSize(config.max_cluster_size);
-  estimator.setSearchMethod(tree);
-  estimator.setInputCloud(cloud_ptr);
-  estimator.extract(cluster_indices);
+  if (!cloud_ptr->points.empty()) {
+    KdTreeT::Ptr tree(new KdTreeT());
+    tree->setInputCloud(cloud_ptr);
+    pcl::EuclideanClusterExtraction<CloudPoint> estimator;
+    estimator.setClusterTolerance(config.cluster_tolerance);
+    estimator.setMinClusterSize(config.min_cluster_size);
+    estimator.setMaxClusterSize(config.max_cluster_size);
+    estimator.setSearchMethod(tree);
+    estimator.setInputCloud(cloud_ptr);
+    estimator.extract(cluster_indices);
+  }
 }
 
 float computeMedian(std::vector<float>& coords) {
@@ -318,30 +336,51 @@ CloudPoint computeMeshMedian(MeshCloud::Ptr mesh_ptr) {
   return mesh_median;
 }
 
-bool isPointCloseToCloud(const CloudPoint& point_D,
-                         const MeshCloud::Ptr instance_mesh,
-                         pcl::KdTreeFLANN<CloudPoint> kdtree,
-                         int k,
-                         float threshold) {
+bool isPointCloseToCloudNaive(const CloudPoint& point_D,
+                              const MeshCloud::Ptr instance_mesh,
+                              float threshold) {
   if (instance_mesh->points.empty()) {
     return false;
+  } else {
+    for (std::size_t i = 0; i < instance_mesh->size(); ++i) {
+      CloudPoint instance_point;
+      instance_point.x = instance_mesh->points[i].x;
+      instance_point.y = instance_mesh->points[i].y;
+      instance_point.z = instance_mesh->points[i].z;
+      float dist = l2_norm_sq(point_D, instance_point);
+      if (dist < threshold) {
+        return true;
+      }
+    }
   }
-  kdtree.setInputCloud(instance_mesh);
-  // holds the resultant indices of the neighboring points
-  std::vector<int> pointIdxKNNSearch(k);
-  // holds the resultant squared distances to nearby points
-  std::vector<float> pointKNNSqrNorm(k);
-  if (kdtree.nearestKSearch(point_D, k, pointIdxKNNSearch, pointKNNSqrNorm) > 0) {
-    for (std::size_t i = 0; i < pointIdxKNNSearch.size(); ++i) {
-      std::size_t idx = pointIdxKNNSearch[i];
-      if (idx < instance_mesh->points.size()) {
-        CloudPoint instance_point;
-        instance_point.x = instance_mesh->points[idx].x;
-        instance_point.y = instance_mesh->points[idx].y;
-        instance_point.z = instance_mesh->points[idx].z;
-        float dist = l2_norm_sq(point_D, instance_point);
-        if (dist < threshold) {
-          return true;
+  return false;
+}
+
+bool isPointCloseToCloudKDTree(const CloudPoint& point_D,
+                               const MeshCloud::Ptr instance_mesh,
+                               pcl::KdTreeFLANN<CloudPoint> kdtree,
+                               int k,
+                               float threshold) {
+  if (instance_mesh->points.empty()) {
+    return false;
+  } else {
+    kdtree.setInputCloud(instance_mesh);
+    // holds the resultant indices of the neighboring points
+    std::vector<int> pointIdxKNNSearch(k);
+    // holds the resultant squared distances to nearby points
+    std::vector<float> pointKNNSqrNorm(k);
+    if (kdtree.nearestKSearch(point_D, k, pointIdxKNNSearch, pointKNNSqrNorm) > 0) {
+      for (std::size_t i = 0; i < pointIdxKNNSearch.size(); ++i) {
+        std::size_t idx = pointIdxKNNSearch[i];
+        if (idx < instance_mesh->points.size()) {
+          CloudPoint instance_point;
+          instance_point.x = instance_mesh->points[idx].x;
+          instance_point.y = instance_mesh->points[idx].y;
+          instance_point.z = instance_mesh->points[idx].z;
+          float dist = l2_norm_sq(point_D, instance_point);
+          if (dist < threshold) {
+            return true;
+          }
         }
       }
     }
@@ -380,32 +419,38 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
 
     // remove outlier
     MeshCloud::Ptr cloud_filtered =
-        cloudStatisticalOutlierRemoval(cloud_floor_rm, 50, 0.5);
+        cloudStatisticalOutlierRemoval(cloud_floor_rm, 50, 1);
 
     CloudPoint mesh_median = computeMeshMedian(cloud_filtered);
-    //! Find Cluster (Try to fix splattering issue)
+    //! Find Cluster (Try to fix splattering issue, skippable if segmentation quality is
+    //! good enough)
     std::vector<pcl::PointIndices> cluster_indices;
-    if (!cloud_filtered->empty()) {
-      euclideanClustering(cloud_filtered, cluster_indices, config);
+    MeshCloud::Ptr valid_cluster(new MeshCloud);
+    if (!config.skip_clustering) {
+      if (!cloud_filtered->points.empty()) {
+        euclideanClustering(cloud_filtered, cluster_indices, config);
+        int k = 10;
+        float threshold = 0.025;
+        for (const auto& cluster : cluster_indices) {
+          pcl::KdTreeFLANN<CloudPoint> kdtree;
+          MeshCloud::Ptr cluster_cloud(new MeshCloud);
+          for (const auto& id : cluster.indices) {
+            CloudPoint point;
+            point.x = cloud_filtered->points[id].x;
+            point.y = cloud_filtered->points[id].y;
+            point.z = cloud_filtered->points[id].z;
+            cluster_cloud->push_back(point);
+          }
+          if (isPointCloseToCloudKDTree(
+                  mesh_median, cluster_cloud, kdtree, k, threshold)) {
+            *valid_cluster += *cluster_cloud;
+          }
+        }
+      }
+    } else {
+      valid_cluster = cloud_filtered;
     }
 
-    MeshCloud::Ptr valid_cluster(new MeshCloud);
-    int k = 10;
-    float threshold = 0.025;
-    for (const auto& cluster : cluster_indices) {
-      pcl::KdTreeFLANN<CloudPoint> kdtree;
-      MeshCloud::Ptr cluster_cloud(new MeshCloud);
-      for (const auto& id : cluster.indices) {
-        CloudPoint point;
-        point.x = cloud_filtered->points[id].x;
-        point.y = cloud_filtered->points[id].y;
-        point.z = cloud_filtered->points[id].z;
-        cluster_cloud->push_back(point);
-      }
-      if (isPointCloseToCloud(mesh_median, cluster_cloud, kdtree, k, threshold)) {
-        *valid_cluster += *cluster_cloud;
-      }
-    }
     if (valid_cluster->size() > 0) {
       int64 class_id = mask_data.class_id;
       InstanceData instance_data = std::make_pair(mask_data, valid_cluster);
@@ -438,21 +483,27 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
       Cluster instance_cluster;
       //! NOTE: Go over all points in vertex updates, go check if it is close to a point
       //! of instance mesh
-      pcl::KdTreeFLANN<CloudPoint> kdtree;
-      int k = 10;
       for (const auto& point_id : indices) {
         if (registered_indices.find(point_id) == registered_indices.end()) {
           const auto& point_D = delta.vertex_updates->at(point_id);
-          if (!instance_mesh->points.empty()) {
+          bool is_point_close_to_cloud;
+          if (config.use_kdtree_distance_check) {
+            pcl::KdTreeFLANN<CloudPoint> kdtree;
+            int k = 10;
             kdtree.setInputCloud(instance_mesh);
-            if (isPointCloseToCloud(point_D, instance_mesh, kdtree, k, threshold)) {
-              //! NOTE: Registering index
-              registered_indices.insert(point_id);
-              instance_cluster.indices.push_back(point_id);
-              const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
-              instance_cluster.centroid += pos;
-              instance_cluster.mesh.push_back(point_D);
-            }
+            is_point_close_to_cloud =
+                isPointCloseToCloudKDTree(point_D, instance_mesh, kdtree, k, threshold);
+          } else {
+            is_point_close_to_cloud =
+                isPointCloseToCloudNaive(point_D, instance_mesh, threshold);
+          }
+          if (is_point_close_to_cloud) {
+            //! NOTE: Registering index
+            registered_indices.insert(point_id);
+            instance_cluster.indices.push_back(point_id);
+            const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
+            instance_cluster.centroid += pos;
+            instance_cluster.mesh.push_back(point_D);
           }
         }
       }
@@ -573,7 +624,7 @@ void MeshSegmenter::updateGraph(uint64_t timestamp_ns,
         const auto& prev_node = graph.getNode(prev_node_id);
         //! NOTE: Compare with multiple prev nodes, and then merge with the best node to
         //! avoid merging 2 objects that are close
-        if (nodesMatch(cluster, prev_node)) {
+        if (nodesMatch(cluster, prev_node, config)) {
           match_candidates.push_back(prev_node_id);
           matches_prev_node = true;
         }
@@ -594,6 +645,9 @@ void MeshSegmenter::updateGraph(uint64_t timestamp_ns,
         if (assigned_id != std::numeric_limits<NodeId>::max()) {
           updateNodeInGraph(graph, cluster, graph.getNode(assigned_id), timestamp_ns);
         }
+      }
+      if (config.merge_active_nodes) {
+        mergeActiveNodes(graph, label);
       }
     }
   }
@@ -620,7 +674,7 @@ void MeshSegmenter::mergeActiveNodes(DynamicSceneGraph& graph, uint32_t label) {
       }
 
       const auto& other = graph.getNode(other_id);
-      if (nodesMatch(node, other) || nodesMatch(other, node)) {
+      if (nodesMatch(node, other, config) || nodesMatch(other, node, config)) {
         to_merge.push_back(other_id);
       }
     }
@@ -703,7 +757,8 @@ void MeshSegmenter::addNodeToGraph(DynamicSceneGraph& graph,
   View assigned_view(cluster.mask.mask_id, *mask_to_assign);
   attrs->instance_views.addView(cluster.mask.map_view_id, assigned_view);
 
-  std::shared_ptr<SemanticColorMap> label_map = GlobalInfo::instance().getSemanticColorMap();
+  std::shared_ptr<SemanticColorMap> label_map =
+      GlobalInfo::instance().getSemanticColorMap();
   if (!label_map || !label_map->isValid()) {
     label_map = GlobalInfo::instance().setRandomColormap();
     CHECK(label_map != nullptr);

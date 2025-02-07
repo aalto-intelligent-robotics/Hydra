@@ -33,9 +33,10 @@
  * purposes notwithstanding any copyright notation herein.
  * -------------------------------------------------------------------------- */
 #pragma once
-#include <memory>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+
+#include <memory>
 
 #include "hydra/common/dsg_types.h"
 #include "hydra/common/output_sink.h"
@@ -80,6 +81,10 @@ class MeshSegmenter {
     std::vector<Sink::Factory> sinks;
     float min_mesh_z = 0.0;
     float processing_grid_size = 0.1f;
+    bool skip_clustering = false;
+    bool use_kdtree_distance_check = true;
+    float nodes_match_iou_threshold = 0.5;
+    bool merge_active_nodes = false;
   } const config;
 
   explicit MeshSegmenter(const Config& config);
