@@ -85,6 +85,7 @@ class MeshSegmenter {
     bool use_kdtree_distance_check = true;
     float nodes_match_iou_threshold = 0.5;
     bool merge_active_nodes = false;
+    float close_to_cloud_threshold = 0.025;
   } const config;
 
   explicit MeshSegmenter(const Config& config);

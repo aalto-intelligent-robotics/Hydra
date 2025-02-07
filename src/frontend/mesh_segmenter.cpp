@@ -114,6 +114,7 @@ void declare_config(MeshSegmenter::Config& config) {
   field(config.use_kdtree_distance_check, "use_kdtree_distance_check");
   field(config.nodes_match_iou_threshold, "nodes_match_iou_threshold");
   field(config.merge_active_nodes, "merge_active_nodes");
+  field(config.close_to_cloud_threshold, "close_to_cloud_threshold");
 }
 
 template <typename LList, typename RList>
@@ -430,7 +431,7 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
       if (!cloud_filtered->points.empty()) {
         euclideanClustering(cloud_filtered, cluster_indices, config);
         int k = 10;
-        float threshold = 0.025;
+        // float threshold = 0.025;
         for (const auto& cluster : cluster_indices) {
           pcl::KdTreeFLANN<CloudPoint> kdtree;
           MeshCloud::Ptr cluster_cloud(new MeshCloud);
@@ -442,7 +443,7 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
             cluster_cloud->push_back(point);
           }
           if (isPointCloseToCloudKDTree(
-                  mesh_median, cluster_cloud, kdtree, k, threshold)) {
+                  mesh_median, cluster_cloud, kdtree, k, config.close_to_cloud_threshold)) {
             *valid_cluster += *cluster_cloud;
           }
         }
@@ -484,7 +485,8 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
       //! NOTE: Go over all points in vertex updates, go check if it is close to a point
       //! of instance mesh
       for (const auto& point_id : indices) {
-        if (registered_indices.find(point_id) == registered_indices.end()) {
+        const auto& global_idx = delta.getGlobalIndex(point_id);
+        if (registered_indices.find(global_idx) == registered_indices.end()) {
           const auto& point_D = delta.vertex_updates->at(point_id);
           bool is_point_close_to_cloud;
           if (config.use_kdtree_distance_check) {
@@ -499,8 +501,8 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
           }
           if (is_point_close_to_cloud) {
             //! NOTE: Registering index
-            registered_indices.insert(point_id);
-            instance_cluster.indices.push_back(point_id);
+            registered_indices.insert(global_idx);
+            instance_cluster.indices.push_back(global_idx);
             const Eigen::Vector3d pos(point_D.x, point_D.y, point_D.z);
             instance_cluster.centroid += pos;
             instance_cluster.mesh.push_back(point_D);
@@ -550,7 +552,12 @@ LabelClusters MeshSegmenter::detect(const ReconstructionOutput& input,
   }
 
   std::unordered_set<size_t> registered_indices;
-  for (const auto label : config.labels) {
+  std::set<uint64_t> available_labels;
+  for (const auto& mask : input.sensor_data->instance_masks) {
+    available_labels.insert(mask.class_id);
+  }
+  for (const auto label : available_labels) {
+  // for (const auto label : config.labels) {
     if (!label_indices.count(label)) {
       continue;
     }
