@@ -33,6 +33,10 @@
  * purposes notwithstanding any copyright notation herein.
  * -------------------------------------------------------------------------- */
 #pragma once
+#include <pcl/filters/conditional_removal.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/io/pcd_io.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -123,6 +127,149 @@ class MeshSegmenter {
   Sink::List sinks_;
 };
 
+using Clusters = MeshSegmenter::Clusters;
+using CloudPoint = pcl::PointXYZRGBA;
+using KdTreeT = pcl::search::KdTree<CloudPoint>;
+using MeshCloud = pcl::PointCloud<CloudPoint>;
+using InstanceData = std::pair<MaskData, MeshCloud::Ptr>;
+using ClassToInstance = std::unordered_map<int64, std::vector<InstanceData>>;
+
 void declare_config(MeshSegmenter::Config& config);
+
+/**
+ * @brief Check if two nodes are close together -> consider as the same object, use when
+ * mergeActiveNodes is used
+ *
+ * @param lhs_node the left hand side node
+ * @param rhs_node the right hand side node
+ * @param config MeshSegmenter's config
+ * @return true if the two nodes overlap (one's bounding box contains the centroid of
+ * the other's)
+ */
+bool nodesMatch(const SceneGraphNode& lhs_node,
+                const SceneGraphNode& rhs_node,
+                const MeshSegmenter::Config& config);
+
+/**
+ * @brief Check if a node and a cluster are close to each other -> consider as the same
+ * object
+ *
+ * @param cluster the cluster to compare with
+ * @param node the node to compare the cluster against
+ * @param config MeshSegmenter config
+ * @return true if the cluster and the node are close to each other (the node's bounding
+ * box contains the centroid of the cluster)
+ */
+bool nodesMatch(const Cluster& cluster,
+                const SceneGraphNode& node,
+                const MeshSegmenter::Config& config);
+
+/**
+ * @brief Remove the floor of the input point cloud
+ *
+ * @param cloud the input cloud
+ * @param z the minimum height above which the points are retained
+ */
+MeshCloud::Ptr removeFloor(MeshCloud::Ptr cloud, float z);
+/**
+ * @brief Downsamples a pointcloud using voxel downsampling
+ *
+ * @param cloud the input cloud
+ * @param vox_size the voxel grid size for downsampling
+ */
+MeshCloud::Ptr downsampleCloud(MeshCloud::Ptr cloud, float vox_size);
+/**
+ * @brief remove outliers from a pointcloud using statistical outlier removal
+ *
+ * @param cloud the input cloud
+ * @param mean_k the mean k value
+ * @param stddev_mul_thresh the standard deviation
+ */
+MeshCloud::Ptr cloudStatisticalOutlierRemoval(MeshCloud::Ptr cloud,
+                                              int mean_k,
+                                              float stddev_mul_thresh);
+/**
+ * @brief Cluster a point cloud using Euclidean clustering
+ *
+ * @param cloud_ptr the input cloud
+ * @param cluster_indices the indices of the input cloud
+ * @param config MeshSegmenter's config
+ */
+void euclideanClustering(MeshCloud::Ptr cloud_ptr,
+                         std::vector<pcl::PointIndices>& cluster_indices,
+                         const MeshSegmenter::Config& config);
+/**
+ * @brief compute the median of a list of floats
+ *
+ * @param input a vector of floats
+ * @return the median of the inputs
+ */
+float computeMedian(std::vector<float>& input);
+/**
+ * @brief compute the median point of a mesh
+ *
+ * @param mesh_ptr a pointer to the mesh
+ * @return the median point of the mesh
+ */
+CloudPoint computeMeshMedian(MeshCloud::Ptr mesh_ptr);
+/**
+ * @brief A function to return if a point is close to the mesh by iteratively going
+ * through all the possible pairs
+ *
+ * @param point_D the point to consider
+ * @param instance_mesh the mesh to consider
+ * @param threshold the threshold below which the point is considered close to the mesh
+ * @return true if the point is close to the instance mesh
+ */
+bool isPointCloseToCloudNaive(const CloudPoint& point_D,
+                              const MeshCloud::Ptr instance_mesh,
+                              float threshold);
+/**
+ * @brief A function to return if a point is close to the mesh by considering the k
+ * closest points using kd-tree search
+ *
+ * @param point_D the point to consider
+ * @param instance_mesh the mesh to consider
+ * @param kdtree the kdtree
+ * @param k the k parameter for the kdtree
+ * @param threshold the threshold below which the poiint is considered close to the
+ * cloud
+ * @return true if the point is considered close to the clouds
+ */
+bool isPointCloseToCloudKDTree(const CloudPoint& point_D,
+                               const MeshCloud::Ptr instance_mesh,
+                               pcl::KdTreeFLANN<CloudPoint> kdtree,
+                               int k,
+                               float threshold);
+/**
+ * @brief compute a hash map of instance information (cloud, instance view data) from
+ * the reconstructed vertex map.
+ *
+ * @param input the reconstruction output
+ * @param config MeshSegmenter config
+ * @return unordered_map {class_id -> vector{<MaskData, MeshCloud>}}
+ */
+ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
+                                       MeshSegmenter::Config config);
+/**
+ * @brief extract pcl clusters for each instance from the monolithic map. From the
+ * reconstructed clouds from compute InstancesClouds, go over the full map's point
+ * cloud, if a point is close enough to a mesh, it is considered part of that mesh
+ *
+ * @param config MeshSegmenter config
+ * @param delta kimera_pgmo delta (volumetric changes between t and t+1)
+ * @param indices indices of delta that contains the class semantic
+ * @param class_id the class semantic
+ * @param class_to_instance map {class_id -> instance_info}. (see
+ * computeInstancesClouds)
+ * @param registered_indices set of indices that have already been registered
+ * @return clusters of points from the monolithic map
+ */
+Clusters findInstanceClusters(const MeshSegmenter::Config& config,
+                              const kimera_pgmo::MeshDelta& delta,
+                              const std::vector<size_t>& indices,
+                              const int64& class_id,
+                              const ClassToInstance& class_to_instance,
+                              std::unordered_set<size_t>& registered_indices);
 
 }  // namespace hydra

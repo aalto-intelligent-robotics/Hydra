@@ -85,7 +85,6 @@ class FrontendModule : public Module {
       double time_horizon = 10.0;
     } pgmo;
     MeshSegmenter::Config object_config;
-    //! TEST: Try instance segmenting
     config::VirtualConfig<PoseGraphTracker> pose_graph_tracker{
         PoseGraphFromOdom::Config()};
     config::VirtualConfig<SurfacePlacesInterface> surface_places;

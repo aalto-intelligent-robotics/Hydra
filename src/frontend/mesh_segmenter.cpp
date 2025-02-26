@@ -37,10 +37,6 @@
 #include <Eigen/src/Core/Matrix.h>
 #include <glog/logging.h>
 #include <kimera_pgmo/mesh_delta.h>
-#include <pcl/filters/conditional_removal.h>
-#include <pcl/filters/statistical_outlier_removal.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/io/pcd_io.h>
 #include <spark_dsg/bounding_box.h>
 #include <spark_dsg/instance_views.h>
 #include <spark_dsg/mesh.h>
@@ -146,7 +142,7 @@ std::string printLabels(const std::set<T>& labels) {
   return ss.str();
 }
 
-inline bool nodesMatch(const SceneGraphNode& lhs_node,
+bool nodesMatch(const SceneGraphNode& lhs_node,
                        const SceneGraphNode& rhs_node,
                        const MeshSegmenter::Config& config) {
   auto& lhs_node_attr = lhs_node.attributes<ObjectNodeAttributes>();
@@ -161,7 +157,7 @@ inline bool nodesMatch(const SceneGraphNode& lhs_node,
   return false;
 }
 
-inline bool nodesMatch(const Cluster& cluster,
+bool nodesMatch(const Cluster& cluster,
                        const SceneGraphNode& node,
                        const MeshSegmenter::Config& config) {
   auto& node_attr = node.attributes<ObjectNodeAttributes>();
@@ -303,13 +299,13 @@ void euclideanClustering(MeshCloud::Ptr cloud_ptr,
   }
 }
 
-float computeMedian(std::vector<float>& coords) {
-  std::sort(coords.begin(), coords.end());
-  size_t n = coords.size();
+float computeMedian(std::vector<float>& input) {
+  std::sort(input.begin(), input.end());
+  size_t n = input.size();
   if (n % 2 == 0) {
-    return (coords[n / 2 - 1] + coords[n / 2]) / 2.0f;
+    return (input[n / 2 - 1] + input[n / 2]) / 2.0f;
   } else {
-    return coords[n / 2];
+    return input[n / 2];
   }
 }
 
@@ -431,7 +427,6 @@ ClassToInstance computeInstancesClouds(const ReconstructionOutput& input,
       if (!cloud_filtered->points.empty()) {
         euclideanClustering(cloud_filtered, cluster_indices, config);
         int k = 10;
-        // float threshold = 0.025;
         for (const auto& cluster : cluster_indices) {
           pcl::KdTreeFLANN<CloudPoint> kdtree;
           MeshCloud::Ptr cluster_cloud(new MeshCloud);
@@ -475,7 +470,7 @@ Clusters findInstanceClusters(const MeshSegmenter::Config& config,
                               std::unordered_set<size_t>& registered_indices) {
   Clusters clusters;
 
-  float threshold = 0.025;
+  float threshold = config.close_to_cloud_threshold;
 
   if (class_to_instance.find(class_id) != class_to_instance.end()) {
     for (const auto& instance_data : class_to_instance.at(class_id)) {
@@ -629,8 +624,6 @@ void MeshSegmenter::updateGraph(uint64_t timestamp_ns,
       std::vector<NodeId> match_candidates;
       for (const auto& prev_node_id : active_nodes_.at(label)) {
         const auto& prev_node = graph.getNode(prev_node_id);
-        //! NOTE: Compare with multiple prev nodes, and then merge with the best node to
-        //! avoid merging 2 objects that are close
         if (nodesMatch(cluster, prev_node, config)) {
           match_candidates.push_back(prev_node_id);
           matches_prev_node = true;
