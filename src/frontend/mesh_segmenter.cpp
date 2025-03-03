@@ -66,7 +66,6 @@
 #include <config_utilities/types/conversions.h>
 #include <config_utilities/types/enum.h>
 #include <config_utilities/validation.h>
-#include <hydra/utils/cloud_distance.h>
 #include <spark_dsg/bounding_box_extraction.h>
 
 #include "hydra/common/global_info.h"

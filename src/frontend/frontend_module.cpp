@@ -39,7 +39,6 @@
 #include <config_utilities/printing.h>
 #include <config_utilities/validation.h>
 #include <glog/logging.h>
-#include <hydra/utils/cloud_distance.h>
 #include <kimera_pgmo/compression/block_compression.h>
 #include <kimera_pgmo/compression/delta_compression.h>
 #include <kimera_pgmo/utils/common_functions.h>
