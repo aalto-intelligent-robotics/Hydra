@@ -1,5 +1,8 @@
 ## Hydra
 
+> **Note**<br>
+> This is our fork for the original Hydra project from [here](https://github.com/MIT-SPARK/Hydra) to enable our project [REACT](https://github.com/aalto-intelligent-robotics/REACT).
+
 <div align="center">
     <img src="doc/media/hydra.GIF">
 </div>
